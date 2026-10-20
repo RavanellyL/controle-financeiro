@@ -3,11 +3,11 @@ import {
   ResponsiveContainer,
   BarChart,
   Bar,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
 } from "recharts";
 import {
   listarTransacoes,
@@ -21,7 +21,6 @@ import {
   type Transacao,
   type NovaTransacao,
 } from "./api";
-import "./App.css";
 
 function moeda(valor: number) {
   return valor.toLocaleString("pt-BR", {
@@ -35,7 +34,7 @@ function dataFormatada(data: string) {
   return `${dia}/${mes}/${ano}`;
 }
 
-function App() {
+export default function App() {
   const [token, setToken] = useState<string | null>(obterToken());
   const [modoAuth, setModoAuth] = useState<"login" | "cadastro">("login");
   const [emailAuth, setEmailAuth] = useState("");
@@ -67,7 +66,7 @@ function App() {
       setTransacoes(lista);
       setErro("");
     } catch {
-      setErro("Sessão expirada ou falha ao conectar com o backend. Faça login novamente.");
+      setErro("Sessão expirada ou falha ao conectar com o backend.");
       fazerLogout();
     } finally {
       setCarregando(false);
@@ -108,66 +107,35 @@ function App() {
   }
 
   const transacoesFiltradas = transacoes.filter((transacao) => {
-    const correspondeMes =
-      filtroMes === "" || transacao.data.startsWith(filtroMes);
-
-    const correspondeCategoria =
-      filtroCategoria === "Todas" ||
-      transacao.categoria === filtroCategoria;
-
-    const correspondeTipo =
-      filtroTipo === "todos" || transacao.tipo === filtroTipo;
-
+    const correspondeMes = filtroMes === "" || transacao.data.startsWith(filtroMes);
+    const correspondeCategoria = filtroCategoria === "Todas" || transacao.categoria === filtroCategoria;
+    const correspondeTipo = filtroTipo === "todos" || transacao.tipo === filtroTipo;
     const correspondeBusca =
       buscaTexto.trim() === "" ||
       transacao.descricao.toLowerCase().includes(buscaTexto.toLowerCase());
 
-    return (
-      correspondeMes &&
-      correspondeCategoria &&
-      correspondeTipo &&
-      correspondeBusca
-    );
+    return correspondeMes && correspondeCategoria && correspondeTipo && correspondeBusca;
   });
 
   const resumoFiltrado = transacoesFiltradas.reduce(
     (total, transacao) => {
       const valorNumerico = Number(transacao.valor);
-
       if (transacao.tipo === "receita") {
         total.receitas += valorNumerico;
       } else {
         total.despesas += valorNumerico;
       }
-
       total.saldo = total.receitas - total.despesas;
-
       return total;
     },
     { receitas: 0, despesas: 0, saldo: 0 }
   );
 
   const dadosGrafico = [
-    { nome: "Receitas", valor: resumoFiltrado.receitas },
-    { nome: "Despesas", valor: resumoFiltrado.despesas },
+    { nome: "Receitas", valor: resumoFiltrado.receitas, cor: "#10b981" },
+    { nome: "Despesas", valor: resumoFiltrado.despesas, cor: "#f43f5e" },
+    { nome: "Saldo Total", valor: resumoFiltrado.saldo, cor: "#3b82f6" },
   ];
-
-  // const despesasPorCategoria = transacoesFiltradas
-  //   .filter((transacao) => transacao.tipo === "despesa")
-  //   .reduce((grupos, transacao) => {
-  //     const categoriaAtual = transacao.categoria;
-  //     const valorAtual = Number(transacao.valor);
-  //     grupos[categoriaAtual] = (grupos[categoriaAtual] || 0) + valorAtual;
-  //     return grupos;
-  //   }, {} as Record<string, number>);
-
-  // const dadosCategorias = Object.entries(despesasPorCategoria).map(
-  //   ([nome, valor]) => ({ nome, valor })
-  // );
-
-  // const dadosCategorias = Object.entries(despesasPorCategoria).map(
-  //   ([nome, valor]) => ({ nome, valor })
-  // );
 
   function limparFormulario() {
     setDescricao("");
@@ -225,7 +193,7 @@ function App() {
       await atualizarDados();
       limparFormulario();
     } catch {
-      setErro("Não foi possível salvar a transação. Tente novamente.");
+      setErro("Não foi possível salvar a transação.");
     } finally {
       setSalvando(false);
     }
@@ -249,58 +217,76 @@ function App() {
     setBuscaTexto("");
   }
 
-  // TELA DE LOGIN / CADASTRO SE NÃO ESTIVER AUTENTICADO
+  // TELA DE AUTENTICAÇÃO (LOGIN / CADASTRO)
   if (!token) {
     return (
-      <main className="container">
-        <header className="cabecalho">
-          <h1>Controle Financeiro</h1>
-          <p>{modoAuth === "login" ? "Acesse sua conta para continuar." : "Crie sua conta no sistema."}</p>
-        </header>
+      <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4">
+        <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl font-extrabold text-blue-500 tracking-tight">FinControl</h1>
+            <p className="text-slate-400 text-sm mt-2">
+              {modoAuth === "login" ? "Acesse o seu painel financeiro" : "Crie a sua conta em segundos"}
+            </p>
+          </div>
 
-        {erro && <div className="mensagem-erro">{erro}</div>}
-        {mensagemSucesso && <div className="mensagem-sucesso">{mensagemSucesso}</div>}
+          {erro && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-lg text-center">
+              {erro}
+            </div>
+          )}
+          {mensagemSucesso && (
+            <div className="mb-4 p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm rounded-lg text-center">
+              {mensagemSucesso}
+            </div>
+          )}
 
-        <section className="painel" style={{ maxWidth: "400px", margin: "20px auto" }}>
-          <h2>{modoAuth === "login" ? "Entrar" : "Cadastrar-se"}</h2>
-          <form className="formulario" onSubmit={handleAuth}>
-            <label>
-              E-mail
+          <form onSubmit={handleAuth} className="space-y-5">
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                E-mail
+              </label>
               <input
                 type="email"
                 required
                 placeholder="seu@email.com"
                 value={emailAuth}
                 onChange={(e) => setEmailAuth(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               />
-            </label>
+            </div>
 
-            <label>
-              Senha
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
+                Senha
+              </label>
               <input
                 type="password"
                 required
-                placeholder="Sua senha"
+                placeholder="••••••••"
                 value={senhaAuth}
                 onChange={(e) => setSenhaAuth(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
               />
-            </label>
+            </div>
 
-            <button type="submit" style={{ marginTop: "10px" }}>
-              {modoAuth === "login" ? "Entrar no sistema" : "Criar conta"}
+            <button
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/30"
+            >
+              {modoAuth === "login" ? "Entrar na plataforma" : "Criar conta gratuita"}
             </button>
           </form>
 
-          <div style={{ marginTop: "15px", textAlign: "center" }}>
+          <div className="mt-6 text-center text-sm text-slate-400">
             {modoAuth === "login" ? (
               <p>
                 Não tem uma conta?{" "}
                 <button
                   type="button"
-                  className="botao-secundario"
                   onClick={() => { setModoAuth("cadastro"); setErro(""); }}
+                  className="text-blue-400 font-semibold hover:underline"
                 >
-                  Cadastre-se
+                  Registe-se
                 </button>
               </p>
             ) : (
@@ -308,251 +294,305 @@ function App() {
                 Já possui conta?{" "}
                 <button
                   type="button"
-                  className="botao-secundario"
                   onClick={() => { setModoAuth("login"); setErro(""); }}
+                  className="text-blue-400 font-semibold hover:underline"
                 >
                   Voltar ao login
                 </button>
               </p>
             )}
           </div>
-        </section>
-      </main>
+        </div>
+      </div>
     );
   }
 
-  // TELA DO DASHBOARD APÓS ESTAR LOGADO
+  // TELA DO DASHBOARD PRINCIPAL
   return (
-    <main className="container">
-      <header className="cabecalho" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
+      {/* BARRA LATERAL (SIDEBAR) */}
+      <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
         <div>
-          <h1>Controle Financeiro</h1>
-          <p>Organize suas receitas e despesas.</p>
-        </div>
-        <button type="button" className="botao-excluir" onClick={fazerLogout}>
-          Sair da conta
-        </button>
-      </header>
-
-      {erro && <div className="mensagem-erro">{erro}</div>}
-
-      <section className="resumos">
-        <article className="cartao">
-          <h3>Receitas</h3>
-          <p className="valor receita">{moeda(resumoFiltrado.receitas)}</p>
-        </article>
-
-        <article className="cartao">
-          <h3>Despesas</h3>
-          <p className="valor despesa">{moeda(resumoFiltrado.despesas)}</p>
-        </article>
-
-        <article className="cartao">
-          <h3>Saldo</h3>
-          <p className={`valor ${resumoFiltrado.saldo >= 0 ? "receita" : "despesa"}`}>
-            {moeda(resumoFiltrado.saldo)}
-          </p>
-        </article>
-      </section>
-
-      <section className="painel">
-        <h2>Visão financeira</h2>
-        <div className="grafico">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={dadosGrafico}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="nome" />
-              <YAxis />
-              <Tooltip formatter={(value) => moeda(Number(value))} />
-              <Legend />
-              <Bar dataKey="valor" name="Valor" fill="#2563eb" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      </section>
-
-      <section className="painel">
-        <h2>
-          {editandoId !== null ? "Editar transação" : "Nova transação"}
-        </h2>
-
-        <form className="formulario" onSubmit={cadastrarOuEditar}>
-          <label>
-            Descrição
-            <input
-              type="text"
-              placeholder="Ex.: Salário, aluguel, mercado"
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-              maxLength={100}
-              required
-            />
-          </label>
-
-          <label>
-            Categoria
-            <select value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-              <option value="Trabalho">Trabalho</option>
-              <option value="Moradia">Moradia</option>
-              <option value="Alimentação">Alimentação</option>
-              <option value="Transporte">Transporte</option>
-              <option value="Saúde">Saúde</option>
-              <option value="Educação">Educação</option>
-              <option value="Lazer">Lazer</option>
-              <option value="Contas">Contas</option>
-              <option value="Outros">Outros</option>
-            </select>
-          </label>
-
-          <label>
-            Tipo
-            <select value={tipo} onChange={(e) => setTipo(e.target.value as "receita" | "despesa")}>
-              <option value="despesa">Despesa</option>
-              <option value="receita">Receita</option>
-            </select>
-          </label>
-
-          <label>
-            Valor (R$)
-            <input
-              type="number"
-              placeholder="0.00"
-              value={valor}
-              onChange={(e) => setValor(e.target.value)}
-              min="0.01"
-              step="0.01"
-              required
-            />
-          </label>
-
-          <label>
-            Data (opcional)
-            <input
-              type="date"
-              value={dataTransacao}
-              onChange={(e) => setDataTransacao(e.target.value)}
-            />
-          </label>
-
-          <div className="acoes-formulario">
-            <button type="submit" disabled={salvando}>
-              {salvando
-                ? "Salvando..."
-                : editandoId !== null
-                  ? "Salvar alterações"
-                  : "Cadastrar transação"}
-            </button>
-
-            {editandoId !== null && (
-              <button type="button" className="botao-secundario" onClick={limparFormulario}>
-                Cancelar edição
-              </button>
-            )}
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-blue-500/20">
+              F
+            </div>
+            <span className="text-xl font-bold tracking-tight text-white">FinControl</span>
           </div>
-        </form>
-      </section>
 
-      <section className="painel">
-        <h2>Transações</h2>
+          <nav className="space-y-2">
+            <a href="#" className="flex items-center gap-3 px-4 py-3 bg-blue-600/10 text-blue-400 font-medium rounded-xl border border-blue-500/20">
+              Dashboard
+            </a>
+          </nav>
+        </div>
 
-        <div className="filtros">
-          <label>
-            Buscar por descrição
-            <input
-              type="text"
-              placeholder="Ex.: Mercado, Uber..."
-              value={buscaTexto}
-              onChange={(e) => setBuscaTexto(e.target.value)}
-            />
-          </label>
-
-          <label>
-            Mês
-            <input type="month" value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} />
-          </label>
-
-          <label>
-            Categoria
-            <select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
-              <option value="Todas">Todas as categorias</option>
-              <option value="Trabalho">Trabalho</option>
-              <option value="Moradia">Moradia</option>
-              <option value="Alimentação">Alimentação</option>
-              <option value="Transporte">Transporte</option>
-              <option value="Saúde">Saúde</option>
-              <option value="Educação">Educação</option>
-              <option value="Lazer">Lazer</option>
-              <option value="Contas">Contas</option>
-              <option value="Outros">Outros</option>
-            </select>
-          </label>
-
-          <label>
-            Tipo
-            <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)}>
-              <option value="todos">Receitas e despesas</option>
-              <option value="receita">Somente receitas</option>
-              <option value="despesa">Somente despesas</option>
-            </select>
-          </label>
-
-          <button type="button" className="botao-secundario" onClick={limparFiltros}>
-            Limpar filtros
+        <div className="pt-6 border-t border-slate-800">
+          <button
+            onClick={fazerLogout}
+            className="w-full text-left px-4 py-2 text-sm text-slate-400 hover:text-red-400 transition-colors"
+          >
+            Sair da conta
           </button>
         </div>
+      </aside>
 
-        <p className="contador">{transacoesFiltradas.length} transação(ões) encontrada(s).</p>
+      {/* CONTEÚDO PRINCIPAL */}
+      <main className="flex-1 p-6 md:p-10 max-w-7xl mx-auto space-y-8 overflow-y-auto">
+        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Visão Geral</h1>
+            <p className="text-slate-400 text-sm mt-1">Acompanhe as suas finanças pessoais em tempo real.</p>
+          </div>
+        </header>
 
-        {carregando ? (
-          <p>Carregando transações...</p>
-        ) : transacoesFiltradas.length === 0 ? (
-          <p>Nenhuma transação encontrada com esses filtros.</p>
-        ) : (
-          <div className="tabela-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Descrição</th>
-                  <th>Categoria</th>
-                  <th>Tipo</th>
-                  <th>Data</th>
-                  <th>Valor</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {transacoesFiltradas.map((transacao) => (
-                  <tr key={transacao.id}>
-                    <td>{transacao.descricao}</td>
-                    <td>{transacao.categoria}</td>
-                    <td>
-                      <span className={transacao.tipo === "receita" ? "etiqueta receita" : "etiqueta despesa"}>
-                        {transacao.tipo === "receita" ? "Receita" : "Despesa"}
-                      </span>
-                    </td>
-                    <td>{dataFormatada(transacao.data)}</td>
-                    <td className={transacao.tipo === "receita" ? "receita" : "despesa"}>
-                      {moeda(Number(transacao.valor))}
-                    </td>
-                    <td>
-                      <div className="acoes-tabela">
-                        <button type="button" className="botao-secundario" onClick={() => prepararEdicao(transacao)}>
-                          Editar
-                        </button>
-                        <button type="button" className="botao-excluir" onClick={() => excluir(transacao.id)}>
-                          Excluir
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {erro && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl">
+            {erro}
           </div>
         )}
-      </section>
-    </main>
+
+        {/* CARTÕES DE RESUMO */}
+        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
+            <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Receitas</span>
+            <p className="text-3xl font-bold text-emerald-400 mt-2">{moeda(resumoFiltrado.receitas)}</p>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
+            <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Despesas</span>
+            <p className="text-3xl font-bold text-rose-400 mt-2">{moeda(resumoFiltrado.despesas)}</p>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
+            <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Saldo Total</span>
+            <p className={`text-3xl font-bold mt-2 ${resumoFiltrado.saldo >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {moeda(resumoFiltrado.saldo)}
+            </p>
+          </div>
+        </section>
+
+        {/* GRÁFICO E FORMULÁRIO */}
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <h2 className="text-lg font-bold mb-4">Balanço Financeiro</h2>
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={dadosGrafico} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="nome" stroke="#94a3b8" tickLine={false} axisLine={false} />
+                  <YAxis stroke="#94a3b8" tickLine={false} axisLine={false} />
+                  <Tooltip
+                    cursor={{ fill: "rgba(255, 255, 255, 0.03)" }}
+                    contentStyle={{
+                      backgroundColor: "#0f172a",
+                      borderColor: "#334155",
+                      borderRadius: "12px",
+                      color: "#f8fafc",
+                    }}
+                    formatter={(value) => [moeda(Number(value)), "Valor"]}
+                  />
+                  <Bar dataKey="valor" radius={[12, 12, 0, 0]} barSize={50}>
+                    {dadosGrafico.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.cor} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* FORMULÁRIO */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+            <h2 className="text-lg font-bold mb-4">
+              {editandoId !== null ? "Editar Transação" : "Nova Transação"}
+            </h2>
+
+            <form onSubmit={cadastrarOuEditar} className="space-y-4">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Descrição</label>
+                <input
+                  type="text"
+                  placeholder="Ex.: Mercado, Salário..."
+                  value={descricao}
+                  onChange={(e) => setDescricao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Categoria</label>
+                  <select
+                    value={categoria}
+                    onChange={(e) => setCategoria(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="Trabalho">Trabalho</option>
+                    <option value="Moradia">Moradia</option>
+                    <option value="Alimentação">Alimentação</option>
+                    <option value="Transporte">Transporte</option>
+                    <option value="Saúde">Saúde</option>
+                    <option value="Educação">Educação</option>
+                    <option value="Lazer">Lazer</option>
+                    <option value="Contas">Contas</option>
+                    <option value="Outros">Outros</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Tipo</label>
+                  <select
+                    value={tipo}
+                    onChange={(e) => setTipo(e.target.value as "receita" | "despesa")}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="despesa">Despesa</option>
+                    <option value="receita">Receita</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Valor (R$)</label>
+                  <input
+                    type="number"
+                    placeholder="0.00"
+                    value={valor}
+                    onChange={(e) => setValor(e.target.value)}
+                    step="0.01"
+                    min="0.01"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Data</label>
+                  <input
+                    type="date"
+                    value={dataTransacao}
+                    onChange={(e) => setDataTransacao(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={salvando}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl transition-all text-sm shadow-md"
+              >
+                {salvando ? "A salvar..." : editandoId !== null ? "Salvar Alterações" : "Adicionar Transação"}
+              </button>
+
+              {editandoId !== null && (
+                <button
+                  type="button"
+                  onClick={limparFormulario}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-sm transition-all"
+                >
+                  Cancelar Edição
+                </button>
+              )}
+            </form>
+          </div>
+        </section>
+
+        {/* TABELA DE TRANSAÇÕES */}
+        <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+            <h2 className="text-lg font-bold">Histórico de Transações</h2>
+
+            {/* FILTROS */}
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+              <input
+                type="text"
+                placeholder="Buscar por descrição..."
+                value={buscaTexto}
+                onChange={(e) => setBuscaTexto(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+              />
+              <input
+                type="month"
+                value={filtroMes}
+                onChange={(e) => setFiltroMes(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+              />
+              <button
+                onClick={limparFiltros}
+                className="text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                Limpar
+              </button>
+            </div>
+          </div>
+
+          {carregando ? (
+            <p className="text-slate-400 text-sm">A carregar transações...</p>
+          ) : transacoesFiltradas.length === 0 ? (
+            <p className="text-slate-400 text-sm">Nenhuma transação encontrada.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 text-xs font-semibold uppercase">
+                    <th className="py-3 px-4">Descrição</th>
+                    <th className="py-3 px-4">Categoria</th>
+                    <th className="py-3 px-4">Tipo</th>
+                    <th className="py-3 px-4">Data</th>
+                    <th className="py-3 px-4">Valor</th>
+                    <th className="py-3 px-4 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {transacoesFiltradas.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-800/50 transition-colors">
+                      <td className="py-3.5 px-4 font-medium">{t.descricao}</td>
+                      <td className="py-3.5 px-4 text-slate-400">{t.categoria}</td>
+                      <td className="py-3.5 px-4">
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                            t.tipo === "receita"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                          }`}
+                        >
+                          {t.tipo === "receita" ? "Receita" : "Despesa"}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-slate-400">{dataFormatada(t.data)}</td>
+                      <td
+                        className={`py-3.5 px-4 font-semibold ${
+                          t.tipo === "receita" ? "text-emerald-400" : "text-rose-400"
+                        }`}
+                      >
+                        {moeda(Number(t.valor))}
+                      </td>
+                      <td className="py-3.5 px-4 text-right space-x-2">
+                        <button
+                          onClick={() => prepararEdicao(t)}
+                          className="text-xs text-blue-400 hover:text-blue-300 font-medium"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => excluir(t.id)}
+                          className="text-xs text-rose-400 hover:text-rose-300 font-medium"
+                        >
+                          Excluir
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </main>
+    </div>
   );
 }
-
-export default App;
