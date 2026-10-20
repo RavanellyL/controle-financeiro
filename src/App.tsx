@@ -22,23 +22,29 @@ import {
   type NovaTransacao,
 } from "./api";
 
-function moeda(valor: number) {
-  return valor.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  });
-}
-
-function dataFormatada(data: string) {
-  const [ano, mes, dia] = data.slice(0, 10).split("-");
-  return `${dia}/${mes}/${ano}`;
-}
-
-type Aba = "dashboard" | "relatorios" | "categorias" | "orcamentos" | "investimentos" | "configuracoes";
+type Aba = "dashboard" | "relatorios" | "categorias" | "orcamentos" | "caixinhas" | "investimentos" | "configuracoes";
 
 interface OrcamentoItem {
   categoria: string;
   limite: number;
+}
+
+interface CaixinhaItem {
+  id: string;
+  nome: string;
+  meta: number;
+  guardado: number;
+  cor: string;
+}
+
+interface FechamentoMes {
+  id: string;
+  mesAno: string;
+  receitas: number;
+  despesas: number;
+  saldo: number;
+  dataSalvo: string;
+  transacoesSnapshot: Transacao[];
 }
 
 const ORCAMENTOS_PADRAO: OrcamentoItem[] = [
@@ -52,6 +58,12 @@ const ORCAMENTOS_PADRAO: OrcamentoItem[] = [
   { categoria: "Outros", limite: 400 },
 ];
 
+const CAIXINHAS_PADRAO: CaixinhaItem[] = [
+  { id: "1", nome: "Reserva de Emergência", meta: 10000, guardado: 3500, cor: "bg-emerald-500" },
+  { id: "2", nome: "Viagem de Férias", meta: 5000, guardado: 1800, cor: "bg-blue-500" },
+  { id: "3", nome: "Troca do Carro", meta: 25000, guardado: 6000, cor: "bg-purple-500" },
+];
+
 export default function App() {
   const [token, setToken] = useState<string | null>(obterToken());
   const [modoAuth, setModoAuth] = useState<"login" | "cadastro">("login");
@@ -59,6 +71,11 @@ export default function App() {
   const [senhaAuth, setSenhaAuth] = useState("");
 
   const [abaAtiva, setAbaAtiva] = useState<Aba>("dashboard");
+
+  // PRIVACIDADE / MASCARAR VALORES
+  const [ocultarValores, setOcultarValores] = useState<boolean>(() => {
+    return localStorage.getItem("fincontrol_ocultar_valores") === "true";
+  });
 
   const [transacoes, setTransacoes] = useState<Transacao[]>([]);
 
@@ -74,30 +91,100 @@ export default function App() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
-  const [filtroMes, setFiltroMes] = useState("");
+  // FILTROS AVANÇADOS DE DATA E BUSCA
+  const [filtroPeriodo, setFiltroPeriodo] = useState<"tudo" | "7dias" | "esteMes" | "anoAtual" | "custom">("tudo");
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("Todas");
   const [filtroTipo, setFiltroTipo] = useState("todos");
   const [buscaTexto, setBuscaTexto] = useState("");
 
-  // Estado dos Orçamentos Editáveis (Persistido no localStorage)
+  // ESTADO DE ORÇAMENTOS (localStorage)
   const [orcamentos, setOrcamentos] = useState<OrcamentoItem[]>(() => {
     const salvos = localStorage.getItem("fincontrol_orcamentos");
     return salvos ? JSON.parse(salvos) : ORCAMENTOS_PADRAO;
   });
-
   const [categoriaEditando, setCategoriaEditando] = useState<string | null>(null);
   const [novoLimiteInput, setNovoLimiteInput] = useState("");
 
-  // ESTADO DO SIMULADOR DE INVESTIMENTOS
+  // ESTADO DE CAIXINHAS (localStorage)
+  const [caixinhas, setCaixinhas] = useState<CaixinhaItem[]>(() => {
+    const salvas = localStorage.getItem("fincontrol_caixinhas");
+    return salvas ? JSON.parse(salvas) : CAIXINHAS_PADRAO;
+  });
+  const [novaCaixinhaNome, setNovaCaixinhaNome] = useState("");
+  const [novaCaixinhaMeta, setNovaCaixinhaMeta] = useState("");
+  const [valorDepositoMap, setValorDepositoMap] = useState<Record<string, string>>({});
+
+  // HISTÓRICO DE MESES FECHADOS (localStorage)
+  const [historicoMeses, setHistoricoMeses] = useState<FechamentoMes[]>(() => {
+    const salvos = localStorage.getItem("fincontrol_historico_meses");
+    return salvos ? JSON.parse(salvos) : [];
+  });
+  const [mesSelecionadoModal, setMesSelecionadoModal] = useState<FechamentoMes | null>(null);
+
+  // SIMULADOR DE INVESTIMENTOS
   const [aporteInicial, setAporteInicial] = useState("1000");
   const [aporteMensal, setAporteMensal] = useState("500");
-  const [taxaJurosAnual, setTaxaJurosAnual] = useState("12"); // 12% ao ano
+  const [taxaJurosAnual, setTaxaJurosAnual] = useState("12");
   const [tempo, setTempo] = useState("5");
   const [tipoTempo, setTipoTempo] = useState<"anos" | "meses">("anos");
+
+  // CONFIGURAÇÕES DA CONTA, PERFIL E IMAGEM
+  const [nomeUsuario, setNomeUsuario] = useState(() => localStorage.getItem("fincontrol_nome_usuario") || "Ravanelly Lima");
+  const [cargoUsuario, setCargoUsuario] = useState(() => localStorage.getItem("fincontrol_cargo_usuario") || "Desenvolvedor");
+  const [fotoPerfil, setFotoPerfil] = useState<string | null>(() => localStorage.getItem("fincontrol_foto_perfil"));
+
+  const [senhaAtual, setSenhaAtual] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
+  const [confirmaNovaSenha, setConfirmaNovaSenha] = useState("");
+  const [feedbackConfig, setFeedbackConfig] = useState<{ tipo: "sucesso" | "erro"; msg: string } | null>(null);
 
   useEffect(() => {
     localStorage.setItem("fincontrol_orcamentos", JSON.stringify(orcamentos));
   }, [orcamentos]);
+
+  useEffect(() => {
+    localStorage.setItem("fincontrol_caixinhas", JSON.stringify(caixinhas));
+  }, [caixinhas]);
+
+  useEffect(() => {
+    localStorage.setItem("fincontrol_ocultar_valores", String(ocultarValores));
+  }, [ocultarValores]);
+
+  useEffect(() => {
+    localStorage.setItem("fincontrol_nome_usuario", nomeUsuario);
+  }, [nomeUsuario]);
+
+  useEffect(() => {
+    localStorage.setItem("fincontrol_cargo_usuario", cargoUsuario);
+  }, [cargoUsuario]);
+
+  useEffect(() => {
+    if (fotoPerfil) {
+      localStorage.setItem("fincontrol_foto_perfil", fotoPerfil);
+    } else {
+      localStorage.removeItem("fincontrol_foto_perfil");
+    }
+  }, [fotoPerfil]);
+
+  useEffect(() => {
+    localStorage.setItem("fincontrol_historico_meses", JSON.stringify(historicoMeses));
+  }, [historicoMeses]);
+
+  function moeda(v: number) {
+    if (ocultarValores) return "R$ •••••";
+    return v.toLocaleString("pt-BR", {
+      style: "currency",
+      currency: "BRL",
+    });
+  }
+
+  function dataFormatada(data: string) {
+    if (!data) return "";
+    const [ano, mes, dia] = data.slice(0, 10).split("-");
+    return `${dia}/${mes}/${ano}`;
+  }
 
   async function atualizarDados() {
     if (!token) return;
@@ -146,15 +233,58 @@ export default function App() {
     }
   }
 
-  const transacoesFiltradas = transacoes.filter((transacao) => {
-    const correspondeMes = filtroMes === "" || transacao.data.startsWith(filtroMes);
-    const correspondeCategoria = filtroCategoria === "Todas" || transacao.categoria === filtroCategoria;
-    const correspondeTipo = filtroTipo === "todos" || transacao.tipo === filtroTipo;
+  function handleUploadFoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("A imagem selecionada deve ter no máximo 2MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFotoPerfil(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function removerFoto() {
+    setFotoPerfil(null);
+  }
+
+  // LÓGICA DE FILTRAGEM POR PERÍODO PERSONALIZADO
+  const transacoesFiltradas = transacoes.filter((t) => {
+    const dataTrans = new Date(t.data.slice(0, 10));
+    const hoje = new Date();
+    
+    let correspondePeriodo = true;
+
+    if (filtroPeriodo === "7dias") {
+      const limite7Dias = new Date();
+      limite7Dias.setDate(hoje.getDate() - 7);
+      correspondePeriodo = dataTrans >= limite7Dias && dataTrans <= hoje;
+    } else if (filtroPeriodo === "esteMes") {
+      correspondePeriodo =
+        dataTrans.getMonth() === hoje.getMonth() &&
+        dataTrans.getFullYear() === hoje.getFullYear();
+    } else if (filtroPeriodo === "anoAtual") {
+      correspondePeriodo = dataTrans.getFullYear() === hoje.getFullYear();
+    } else if (filtroPeriodo === "custom") {
+      if (dataInicio) {
+        correspondePeriodo = correspondePeriodo && dataTrans >= new Date(dataInicio);
+      }
+      if (dataFim) {
+        correspondePeriodo = correspondePeriodo && dataTrans <= new Date(dataFim);
+      }
+    }
+
+    const correspondeCategoria = filtroCategoria === "Todas" || t.categoria === filtroCategoria;
+    const correspondeTipo = filtroTipo === "todos" || t.tipo === filtroTipo;
     const correspondeBusca =
       buscaTexto.trim() === "" ||
-      transacao.descricao.toLowerCase().includes(buscaTexto.toLowerCase());
+      t.descricao.toLowerCase().includes(buscaTexto.toLowerCase());
 
-    return correspondeMes && correspondeCategoria && correspondeTipo && correspondeBusca;
+    return correspondePeriodo && correspondeCategoria && correspondeTipo && correspondeBusca;
   });
 
   const resumoFiltrado = transacoesFiltradas.reduce(
@@ -251,7 +381,9 @@ export default function App() {
   }
 
   function limparFiltros() {
-    setFiltroMes("");
+    setFiltroPeriodo("tudo");
+    setDataInicio("");
+    setDataFim("");
     setFiltroCategoria("Todas");
     setFiltroTipo("todos");
     setBuscaTexto("");
@@ -284,9 +416,122 @@ export default function App() {
     setCategoriaEditando(null);
   }
 
-  // CÁLCULO DOS JUROS COMPOSTOS
+  // CAIXINHAS
+  function criarCaixinha(e: React.FormEvent) {
+    e.preventDefault();
+    const metaNum = Number(novaCaixinhaMeta.replace(",", "."));
+    if (!novaCaixinhaNome.trim() || isNaN(metaNum) || metaNum <= 0) {
+      alert("Informe um nome e uma meta válida.");
+      return;
+    }
+
+    const cores = ["bg-emerald-500", "bg-blue-500", "bg-purple-500", "bg-amber-500", "bg-rose-500", "bg-cyan-500"];
+    const nova: CaixinhaItem = {
+      id: String(Date.now()),
+      nome: novaCaixinhaNome.trim(),
+      meta: metaNum,
+      guardado: 0,
+      cor: cores[Math.floor(Math.random() * cores.length)],
+    };
+
+    setCaixinhas((prev) => [...prev, nova]);
+    setNovaCaixinhaNome("");
+    setNovaCaixinhaMeta("");
+  }
+
+  function depositarCaixinha(id: string) {
+    const valorInput = valorDepositoMap[id];
+    const valorNum = Number((valorInput || "").replace(",", "."));
+
+    if (isNaN(valorNum) || valorNum <= 0) {
+      alert("Informe um valor válido para guardar.");
+      return;
+    }
+
+    setCaixinhas((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, guardado: item.guardado + valorNum } : item
+      )
+    );
+
+    setValorDepositoMap((prev) => ({ ...prev, [id]: "" }));
+  }
+
+  function excluirCaixinha(id: string) {
+    if (!window.confirm("Deseja excluir esta caixinha de objetivo?")) return;
+    setCaixinhas((prev) => prev.filter((item) => item.id !== id));
+  }
+
+  // HISTÓRICO DE MESES & DOWNLOAD NO COMPUTADOR
+  function salvarFechamentoMesAtual() {
+    const hoje = new Date();
+    const mesAno = hoje.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    const nomeMesFormatado = mesAno.charAt(0).toUpperCase() + mesAno.slice(1);
+
+    const listaParaSalvar = transacoes.length > 0 ? transacoes : transacoesFiltradas;
+
+    const novoFechamento: FechamentoMes = {
+      id: String(Date.now()),
+      mesAno: nomeMesFormatado,
+      receitas: resumoFiltrado.receitas,
+      despesas: resumoFiltrado.despesas,
+      saldo: resumoFiltrado.saldo,
+      dataSalvo: hoje.toLocaleDateString("pt-BR"),
+      transacoesSnapshot: [...listaParaSalvar],
+    };
+
+    setHistoricoMeses((prev) => [novoFechamento, ...prev.filter((item) => item.mesAno !== nomeMesFormatado)]);
+    alert(`Fechamento de ${nomeMesFormatado} guardado com sucesso com ${listaParaSalvar.length} transação(ões)!`);
+  }
+
+  function exportarCSV() {
+    if (transacoesFiltradas.length === 0) {
+      alert("Nenhuma transação disponível para exportar.");
+      return;
+    }
+
+    const cabecalho = "ID,Descricao,Categoria,Tipo,Valor,Data\n";
+    const linhas = transacoesFiltradas
+      .map((t) => `${t.id},"${t.descricao.replace(/"/g, '""')}","${t.categoria}","${t.tipo}",${t.valor},${t.data.slice(0, 10)}`)
+      .join("\n");
+
+    const blob = new Blob([cabecalho + linhas], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `transacoes_fincontrol_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function exportarPDF() {
+    window.print();
+  }
+
+  function exportarDadosJSON() {
+    const dadosCompletos = {
+      usuario: emailAuth || "Utilizador Ativo",
+      dataExportacao: new Date().toISOString(),
+      historicoMeses,
+      transacoes,
+      orcamentos,
+      caixinhas,
+    };
+
+    const blob = new Blob([JSON.stringify(dadosCompletos, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `fincontrol_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // JUROS COMPOSTOS
   const numMesesTotal = Math.max(1, (tipoTempo === "anos" ? Number(tempo) * 12 : Number(tempo)) || 1);
-  const taxaMensal = (Math.pow(1 + (Number(taxaJurosAnual) || 0) / 100, 1 / 12) - 1);
+  const taxaMensal = Math.pow(1 + (Number(taxaJurosAnual) || 0) / 100, 1 / 12) - 1;
 
   let acumulado = Number(aporteInicial) || 0;
   let totalInvestido = Number(aporteInicial) || 0;
@@ -302,6 +547,32 @@ export default function App() {
     { nome: "Total Investido", valor: totalInvestido, cor: "#3b82f6" },
     { nome: "Juros Compostos", valor: totalJuros, cor: "#10b981" },
   ];
+
+  // AÇÕES DAS CONFIGURAÇÕES
+  function handleAlterarSenha(e: React.FormEvent) {
+    e.preventDefault();
+    setFeedbackConfig(null);
+
+    if (!senhaAtual) {
+      setFeedbackConfig({ tipo: "erro", msg: "Informe a sua senha atual." });
+      return;
+    }
+
+    if (novaSenha.length < 6) {
+      setFeedbackConfig({ tipo: "erro", msg: "A nova senha deve ter no mínimo 6 caracteres." });
+      return;
+    }
+
+    if (novaSenha !== confirmaNovaSenha) {
+      setFeedbackConfig({ tipo: "erro", msg: "A confirmação da nova senha não coincide." });
+      return;
+    }
+
+    setFeedbackConfig({ tipo: "sucesso", msg: "Senha alterada com sucesso!" });
+    setSenhaAtual("");
+    setNovaSenha("");
+    setConfirmaNovaSenha("");
+  }
 
   // TELA DE AUTENTICAÇÃO
   if (!token) {
@@ -395,14 +666,40 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
-      {/* SIDEBAR COM NAVEGAÇÃO FUNCIONAL */}
-      <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between">
+      {/* SIDEBAR COM PERFIL DO USUÁRIO */}
+      <aside className="w-full md:w-64 bg-slate-900 border-r border-slate-800 p-6 flex flex-col justify-between print:hidden">
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-blue-500/20">
-              F
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-black text-xl shadow-lg shadow-blue-500/20">
+                F
+              </div>
+              <span className="text-xl font-bold tracking-tight text-white">FinControl</span>
             </div>
-            <span className="text-xl font-bold tracking-tight text-white">FinControl</span>
+          </div>
+
+          {/* PERFIL DO USUÁRIO NA SIDEBAR */}
+          <div
+            onClick={() => setAbaAtiva("configuracoes")}
+            className="mb-6 p-3 bg-slate-950/60 hover:bg-slate-800 border border-slate-800 rounded-2xl flex items-center gap-3 cursor-pointer transition-all group"
+          >
+            {fotoPerfil ? (
+              <img
+                src={fotoPerfil}
+                alt="Perfil"
+                className="w-10 h-10 rounded-full object-cover border-2 border-blue-500 shadow-sm"
+              />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-400 flex items-center justify-center font-bold text-base shadow-sm">
+                {nomeUsuario.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="overflow-hidden">
+              <h4 className="text-sm font-bold text-white truncate group-hover:text-blue-400 transition-colors">
+                {nomeUsuario}
+              </h4>
+              <p className="text-[11px] text-slate-400 truncate">{cargoUsuario}</p>
+            </div>
           </div>
 
           <nav className="space-y-1.5">
@@ -454,7 +751,18 @@ export default function App() {
               Orçamentos
             </button>
 
-            {/* NOVA ABA: INVESTIMENTOS */}
+            <button
+              onClick={() => setAbaAtiva("caixinhas")}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
+                abaAtiva === "caixinhas"
+                  ? "bg-blue-600/10 text-blue-400 border border-blue-500/20"
+                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+              Metas & Caixinhas
+            </button>
+
             <button
               onClick={() => setAbaAtiva("investimentos")}
               className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
@@ -494,6 +802,29 @@ export default function App() {
 
       {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 p-6 md:p-10 max-w-7xl mx-auto space-y-8 overflow-y-auto">
+        {/* BOTÃO DE PRIVACIDADE */}
+        {abaAtiva !== "configuracoes" && (
+          <div className="flex justify-end items-center mb-2 print:hidden">
+            <button
+              onClick={() => setOcultarValores(!ocultarValores)}
+              className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all shadow-sm"
+              title={ocultarValores ? "Mostrar valores" : "Ocultar valores (Privacidade)"}
+            >
+              {ocultarValores ? (
+                <>
+                  <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                  <span>Mostrar Valores</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858-5.908a10.025 10.025 0 0110.123 2.937M15 12a3 3 0 11-6 0 3 3 0 016 0zm6 3a9 9 0 01-2.122 3.122m-2.122 2.122L3 3l18 18"/></svg>
+                  <span>Ocultar Valores</span>
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
         {/* ABA: PAINEL / DASHBOARD */}
         {abaAtiva === "dashboard" && (
           <>
@@ -672,12 +1003,37 @@ export default function App() {
                     onChange={(e) => setBuscaTexto(e.target.value)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
                   />
-                  <input
-                    type="month"
-                    value={filtroMes}
-                    onChange={(e) => setFiltroMes(e.target.value)}
+
+                  <select
+                    value={filtroPeriodo}
+                    onChange={(e) => setFiltroPeriodo(e.target.value as any)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
-                  />
+                  >
+                    <option value="tudo">Todo o Período</option>
+                    <option value="7dias">Últimos 7 dias</option>
+                    <option value="esteMes">Este Mês</option>
+                    <option value="anoAtual">Ano Atual</option>
+                    <option value="custom">Personalizado</option>
+                  </select>
+
+                  {filtroPeriodo === "custom" && (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={dataInicio}
+                        onChange={(e) => setDataInicio(e.target.value)}
+                        className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-1 text-xs text-slate-100 focus:outline-none"
+                      />
+                      <span className="text-xs text-slate-500">até</span>
+                      <input
+                        type="date"
+                        value={dataFim}
+                        onChange={(e) => setDataFim(e.target.value)}
+                        className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-1 text-xs text-slate-100 focus:outline-none"
+                      />
+                    </div>
+                  )}
+
                   <button
                     onClick={limparFiltros}
                     className="text-xs text-slate-400 hover:text-white transition-colors"
@@ -690,7 +1046,7 @@ export default function App() {
               {carregando ? (
                 <p className="text-slate-400 text-sm">A carregar transações...</p>
               ) : transacoesFiltradas.length === 0 ? (
-                <p className="text-slate-400 text-sm">Nenhuma transação encontrada.</p>
+                <p className="text-slate-400 text-sm">Nenhuma transação encontrada para este período.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -754,12 +1110,35 @@ export default function App() {
           </>
         )}
 
-        {/* ABA: RELATÓRIOS */}
+        {/* ABA: RELATÓRIOS & FECHAMENTO MENSAL */}
         {abaAtiva === "relatorios" && (
           <div className="space-y-6">
-            <header>
-              <h1 className="text-3xl font-bold tracking-tight">Relatórios Analíticos</h1>
-              <p className="text-slate-400 text-sm mt-1">Análise detalhada das suas despesas organizadas por categoria.</p>
+            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight">Relatórios Analíticos</h1>
+                <p className="text-slate-400 text-sm mt-1">Análise detalhada das suas despesas e fechamentos guardados.</p>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={salvarFechamentoMesAtual}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-emerald-600/20"
+                >
+                  + Salvar Mês Atual
+                </button>
+                <button
+                  onClick={exportarCSV}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                >
+                  Exportar CSV
+                </button>
+                <button
+                  onClick={exportarPDF}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-blue-600/20"
+                >
+                  Exportar PDF
+                </button>
+              </div>
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -787,35 +1166,133 @@ export default function App() {
                 </div>
               </div>
 
+              {/* HISTÓRICO DE MESES GUARDADOS */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
                 <div>
-                  <h2 className="text-lg font-bold mb-2">Resumo de Atividade</h2>
-                  <p className="text-slate-400 text-sm mb-6">Métricas consolidadas com base no histórico atual.</p>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between py-2 border-b border-slate-800">
-                      <span className="text-slate-400">Total de Transações</span>
-                      <span className="font-bold">{transacoesFiltradas.length}</span>
+                  <h2 className="text-lg font-bold mb-2">Histórico de Fechamentos Mensais</h2>
+                  <p className="text-slate-400 text-sm mb-4">Clique num mês guardado para consultar o extrato detalhado.</p>
+
+                  {historicoMeses.length === 0 ? (
+                    <p className="text-slate-500 text-sm">Nenhum mês foi guardado ainda. Clique em "Salvar Mês Atual" acima.</p>
+                  ) : (
+                    <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                      {historicoMeses.map((h) => (
+                        <div
+                          key={h.id}
+                          onClick={() => setMesSelecionadoModal(h)}
+                          className="p-3 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-blue-500/40 rounded-xl flex justify-between items-center text-xs cursor-pointer transition-all shadow-sm group"
+                        >
+                          <div>
+                            <span className="font-bold text-white text-sm block group-hover:text-blue-400 transition-colors">
+                              {h.mesAno}
+                            </span>
+                            <span className="text-slate-500">Salvo em {h.dataSalvo}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-emerald-400 block">+ {moeda(h.receitas)}</span>
+                            <span className="text-rose-400 block">- {moeda(h.despesas)}</span>
+                            <span className={`font-bold mt-0.5 block ${h.saldo >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              Saldo: {moeda(h.saldo)}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="flex justify-between py-2 border-b border-slate-800">
-                      <span className="text-slate-400">Média por Despesa</span>
-                      <span className="font-bold text-rose-400">
-                        {moeda(
-                          transacoesFiltradas.filter((t) => t.tipo === "despesa").length > 0
-                            ? resumoFiltrado.despesas / transacoesFiltradas.filter((t) => t.tipo === "despesa").length
-                            : 0
-                        )}
-                      </span>
-                    </div>
-                    <div className="flex justify-between py-2 border-b border-slate-800">
-                      <span className="text-slate-400">Taxa de Poupança</span>
-                      <span className="font-bold text-emerald-400">
-                        {resumoFiltrado.receitas > 0
-                          ? `${(((resumoFiltrado.receitas - resumoFiltrado.despesas) / resumoFiltrado.receitas) * 100).toFixed(1)}%`
-                          : "0%"}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL / FECHAMENTO MENSAL DETALHADO */}
+        {mesSelecionadoModal && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 print:p-0 print:static print:bg-white print:text-black">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-6 overflow-y-auto max-h-[85vh] print:bg-white print:border-none print:shadow-none print:max-h-full">
+              <div className="flex justify-between items-start border-b border-slate-800 pb-4 print:border-black">
+                <div>
+                  <h2 className="text-2xl font-bold text-white print:text-black">Fechamento: {mesSelecionadoModal.mesAno}</h2>
+                  <p className="text-xs text-slate-400 print:text-gray-600">Guardado em {mesSelecionadoModal.dataSalvo}</p>
+                </div>
+                <button
+                  onClick={() => setMesSelecionadoModal(null)}
+                  className="text-slate-400 hover:text-white p-1 text-lg font-bold print:hidden"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* RESUMO DO MÊS */}
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl print:border-gray-300 print:bg-gray-50">
+                  <span className="text-xs text-slate-400 print:text-gray-600 block uppercase font-semibold">Receitas</span>
+                  <span className="text-lg font-bold text-emerald-400 print:text-emerald-700">{moeda(mesSelecionadoModal.receitas)}</span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl print:border-gray-300 print:bg-gray-50">
+                  <span className="text-xs text-slate-400 print:text-gray-600 block uppercase font-semibold">Despesas</span>
+                  <span className="text-lg font-bold text-rose-400 print:text-rose-700">{moeda(mesSelecionadoModal.despesas)}</span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl print:border-gray-300 print:bg-gray-50">
+                  <span className="text-xs text-slate-400 print:text-gray-600 block uppercase font-semibold">Saldo Final</span>
+                  <span className={`text-lg font-bold ${mesSelecionadoModal.saldo >= 0 ? "text-emerald-400 print:text-emerald-700" : "text-rose-400 print:text-rose-700"}`}>
+                    {moeda(mesSelecionadoModal.saldo)}
+                  </span>
+                </div>
+              </div>
+
+              {/* LISTA DE TRANSAÇÕES DO FECHAMENTO */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold uppercase text-slate-400 print:text-gray-800">Transações Registadas</h3>
+
+                {(!mesSelecionadoModal.transacoesSnapshot || mesSelecionadoModal.transacoesSnapshot.length === 0) ? (
+                  <p className="text-xs text-slate-500 print:text-gray-500">Sem registo detalhado para este fechamento.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-slate-400 uppercase print:border-gray-300 print:text-gray-700">
+                          <th className="py-2 px-3">Descrição</th>
+                          <th className="py-2 px-3">Categoria</th>
+                          <th className="py-2 px-3">Tipo</th>
+                          <th className="py-2 px-3">Data</th>
+                          <th className="py-2 px-3 text-right">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800 print:divide-gray-200">
+                        {mesSelecionadoModal.transacoesSnapshot.map((t) => (
+                          <tr key={t.id} className="print:text-black">
+                            <td className="py-2.5 px-3 font-medium">{t.descricao}</td>
+                            <td className="py-2.5 px-3 text-slate-400 print:text-gray-600">{t.categoria}</td>
+                            <td className="py-2.5 px-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${t.tipo === "receita" ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400"}`}>
+                                {t.tipo === "receita" ? "Receita" : "Despesa"}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-400 print:text-gray-600">{dataFormatada(t.data)}</td>
+                            <td className={`py-2.5 px-3 font-semibold text-right ${t.tipo === "receita" ? "text-emerald-400 print:text-emerald-700" : "text-rose-400 print:text-rose-700"}`}>
+                              {moeda(Number(t.valor))}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 print:hidden">
+                <button
+                  onClick={exportarPDF}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                >
+                  Imprimir / Salvar PDF
+                </button>
+                <button
+                  onClick={() => setMesSelecionadoModal(null)}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                >
+                  Fechar
+                </button>
               </div>
             </div>
           </div>
@@ -927,7 +1404,109 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: INVESTIMENTOS (SIMULADOR DE JUROS COMPOSTOS) */}
+        {/* ABA: METAS & CAIXINHAS */}
+        {abaAtiva === "caixinhas" && (
+          <div className="space-y-8">
+            <header>
+              <h1 className="text-3xl font-bold tracking-tight">Metas de Economia (Caixinhas)</h1>
+              <p className="text-slate-400 text-sm mt-1">Crie objetivos financeiros e acompanhe o progresso das suas economias.</p>
+            </header>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <h2 className="text-lg font-bold mb-4">Criar Nova Caixinha</h2>
+              <form onSubmit={criarCaixinha} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Nome do Objetivo</label>
+                  <input
+                    type="text"
+                    placeholder="Ex.: Viagem, Casa Própria..."
+                    value={novaCaixinhaNome}
+                    onChange={(e) => setNovaCaixinhaNome(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Valor Alvo (R$)</label>
+                  <input
+                    type="number"
+                    placeholder="5000.00"
+                    value={novaCaixinhaMeta}
+                    onChange={(e) => setNovaCaixinhaMeta(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    required
+                  />
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded-xl text-sm transition-all shadow-md shadow-blue-600/20"
+                  >
+                    + Adicionar Meta
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {caixinhas.map((item) => {
+                const pct = Math.min((item.guardado / item.meta) * 100, 100);
+
+                return (
+                  <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start">
+                        <h3 className="font-bold text-lg text-white">{item.nome}</h3>
+                        <button
+                          onClick={() => excluirCaixinha(item.id)}
+                          className="text-slate-500 hover:text-rose-400 transition-colors p-1"
+                          title="Excluir caixinha"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                        </button>
+                      </div>
+
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">Guardado: <strong className="text-emerald-400">{moeda(item.guardado)}</strong></span>
+                        <span className="text-slate-400">Meta: <strong className="text-white">{moeda(item.meta)}</strong></span>
+                      </div>
+
+                      <div className="w-full bg-slate-950 h-3 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${item.cor} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-right text-xs text-slate-400 font-medium">{pct.toFixed(1)}% alcançado</p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800 flex items-center gap-2">
+                      <input
+                        type="number"
+                        placeholder="Valor a guardar..."
+                        value={valorDepositoMap[item.id] || ""}
+                        onChange={(e) =>
+                          setValorDepositoMap({ ...valorDepositoMap, [item.id]: e.target.value })
+                        }
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                      />
+                      <button
+                        onClick={() => depositarCaixinha(item.id)}
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-xl transition-all whitespace-nowrap"
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ABA: INVESTIMENTOS */}
         {abaAtiva === "investimentos" && (
           <div className="space-y-8">
             <header>
@@ -935,7 +1514,6 @@ export default function App() {
               <p className="text-slate-400 text-sm mt-1">Calcule a evolução do seu património acumulado com juros compostos ao longo do tempo.</p>
             </header>
 
-            {/* PAINEL DE RESULTADOS */}
             <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
                 <span className="text-xs font-semibold uppercase text-slate-400 tracking-wider">Valor Total Acumulado</span>
@@ -953,9 +1531,7 @@ export default function App() {
               </div>
             </section>
 
-            {/* FORMULÁRIO E GRÁFICO */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {/* FORMULÁRIO DE SIMULAÇÃO */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
                 <h2 className="text-lg font-bold">Parâmetros do Investimento</h2>
 
@@ -1019,7 +1595,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* GRÁFICO DE COMPARAÇÃO */}
               <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-lg font-bold mb-4">Investido vs. Juros Acumulados</h2>
                 <div className="h-72 w-full">
@@ -1053,38 +1628,226 @@ export default function App() {
 
         {/* ABA: CONFIGURAÇÕES */}
         {abaAtiva === "configuracoes" && (
-          <div className="space-y-6 max-w-2xl">
+          <div className="space-y-8 max-w-4xl">
             <header>
-              <h1 className="text-3xl font-bold tracking-tight">Configurações da Conta</h1>
-              <p className="text-slate-400 text-sm mt-1">Gerencie as suas preferências e segurança da conta.</p>
+              <h1 className="text-3xl font-bold tracking-tight">Configurações da Conta & Perfil</h1>
+              <p className="text-slate-400 text-sm mt-1">Gerencie a sua foto de perfil, nome, preferências e segurança.</p>
             </header>
 
+            {feedbackConfig && (
+              <div
+                className={`p-4 rounded-xl border text-sm font-medium ${
+                  feedbackConfig.tipo === "sucesso"
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                    : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                }`}
+              >
+                {feedbackConfig.msg}
+              </div>
+            )}
+
+            {/* SEÇÃO 1: PERFIL E FOTO DE PERFIL */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
-              <div>
-                <h2 className="text-base font-bold mb-1">Informações do Utilizador</h2>
-                <p className="text-xs text-slate-400 mb-4">Sessão ativa protegida por autenticação JWT.</p>
-                
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">E-mail Registado</label>
-                    <input
-                      type="text"
-                      disabled
-                      value={emailAuth || "Utilizador Ativo"}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-400 cursor-not-allowed"
-                    />
-                  </div>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center font-bold text-lg">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">Perfil do Utilizador</h2>
+                  <p className="text-xs text-slate-400">Personalize o seu nome, função e imagem de perfil</p>
                 </div>
               </div>
 
-              <div className="pt-6 border-t border-slate-800">
-                <h2 className="text-base font-bold mb-1 text-rose-400">Zona de Segurança</h2>
-                <p className="text-xs text-slate-400 mb-4">Encerrar a sessão corrente de forma segura limpa os tokens do navegador.</p>
+              {/* UPLOAD DE IMAGEM */}
+              <div className="flex flex-col sm:flex-row items-center gap-6 p-4 bg-slate-950 border border-slate-800 rounded-xl">
+                <div className="relative group">
+                  {fotoPerfil ? (
+                    <img
+                      src={fotoPerfil}
+                      alt="Perfil"
+                      className="w-20 h-20 rounded-full object-cover border-2 border-blue-500 shadow-md"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-blue-600/20 border-2 border-blue-500/40 text-blue-400 flex items-center justify-center font-black text-2xl shadow-md">
+                      {nomeUsuario.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 text-center sm:text-left">
+                  <span className="text-xs font-semibold uppercase text-slate-400 block tracking-wider">Foto de Perfil</span>
+                  <div className="flex flex-wrap items-center justify-center sm:justify-start gap-3">
+                    <label className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer transition-all shadow-md shadow-blue-600/20">
+                      <span>Carregar Foto</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadFoto}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {fotoPerfil && (
+                      <button
+                        onClick={removerFoto}
+                        className="bg-slate-800 hover:bg-rose-600/20 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 font-semibold text-xs px-3 py-2 rounded-xl transition-all"
+                      >
+                        Remover Foto
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-500">Formatos aceites: JPG, PNG ou WEBP (máx. 2MB)</p>
+                </div>
+              </div>
+
+              {/* CAMPOS NOME E CARGO */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Nome Completo</label>
+                  <input
+                    type="text"
+                    value={nomeUsuario}
+                    onChange={(e) => setNomeUsuario(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Cargo / Função</label>
+                  <input
+                    type="text"
+                    value={cargoUsuario}
+                    onChange={(e) => setCargoUsuario(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    placeholder="Ex.: Desenvolvedor, Analista..."
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs text-slate-400 mb-1">E-mail Registado</label>
+                  <input
+                    type="text"
+                    disabled
+                    value={emailAuth || "Utilizador Ativo"}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-500 cursor-not-allowed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 2: SEGURANÇA & ALTERAÇÃO DE SENHA */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center font-bold">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">Segurança & Autenticação</h2>
+                  <p className="text-xs text-slate-400">Atualize as suas credenciais de acesso e valide a proteção da sua conta</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleAlterarSenha} className="space-y-4 pt-2">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Senha Atual</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={senhaAtual}
+                    onChange={(e) => setSenhaAtual(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Nova Senha</label>
+                    <input
+                      type="password"
+                      placeholder="Mínimo 6 caracteres"
+                      value={novaSenha}
+                      onChange={(e) => setNovaSenha(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">Confirmar Nova Senha</label>
+                    <input
+                      type="password"
+                      placeholder="Repita a nova senha"
+                      value={confirmaNovaSenha}
+                      onChange={(e) => setConfirmaNovaSenha(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl transition-all text-sm shadow-md shadow-blue-600/20"
+                  >
+                    Atualizar Senha
+                  </button>
+                </div>
+              </form>
+
+              <div className="pt-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
+                <span>Proteção de Sessão: <strong className="text-emerald-400">Bearer Token JWT (Algoritmo HS256)</strong></span>
+                <span className="bg-slate-800 px-2.5 py-1 rounded-md font-mono text-slate-300">Sessão Ativa</span>
+              </div>
+            </div>
+
+            {/* SEÇÃO 3: PRIVACIDADE & BACKUP DE DADOS */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-purple-600/20 border border-purple-500/30 text-purple-400 flex items-center justify-center font-bold">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-white">Privacidade & Exportação de Dados</h2>
+                  <p className="text-xs text-slate-400">Obtenha um relatório/backup completo das suas transações e configurações em formato JSON ou CSV</p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <span className="text-sm text-slate-300">Exportar backup local de dados no PC</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={exportarCSV}
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1.5"
+                  >
+                    CSV (Excel)
+                  </button>
+                  <button
+                    onClick={exportarDadosJSON}
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+                  >
+                    JSON (Backup)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 4: ZONA DE PERIGO */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-rose-600/20 border border-rose-500/30 text-rose-400 flex items-center justify-center font-bold">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-rose-400">Zona de Segurança & Encerramento</h2>
+                  <p className="text-xs text-slate-400">Encerrar a sessão limpa com segurança os tokens JWT guardados no seu navegador</p>
+                </div>
+              </div>
+
+              <div className="pt-2 flex justify-start">
                 <button
                   onClick={fazerLogout}
-                  className="bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 font-semibold px-4 py-2.5 rounded-xl transition-all text-sm"
+                  className="bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 font-semibold px-5 py-2.5 rounded-xl transition-all text-sm"
                 >
-                  Sair do FinControl
+                  Encerrar Sessão no FinControl
                 </button>
               </div>
             </div>
