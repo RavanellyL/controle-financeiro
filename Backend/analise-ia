@@ -1,0 +1,40 @@
+import os
+from fastapi import APIRouter, Depends, HTTPException
+from google import genai
+from google.genai import types
+
+# Inicialize o cliente do Gemini (Certifique-se de configurar a variável de ambiente GEMINI_API_KEY)
+# Ou passe a chave diretamente se preferir.
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+@router.post("/analise-ia")
+def analisar_financas(transacoes: list, usuario_atual = Depends(obter_usuario_autenticado)):
+    if not transacoes:
+        return {"analise": "Ainda não existem transações registadas para análise."}
+
+    # Formata as transações para o prompt da IA
+    dados_formatados = "\n".join([
+        f"- {t.get('descricao')}: R$ {t.get('valor')} ({t.get('tipo')} na categoria {t.get('categoria')}) em {t.get('data')}"
+        for t in transacoes
+    ])
+
+    prompt = f"""
+    Atue como um consultor financeiro pessoal especialista e amigável. 
+    Analise as seguintes transações financeiras do utilizador:
+    {dados_formatados}
+
+    Forneça uma análise concisa dividida em:
+    1. Diagnóstico rápido dos gastos do mês.
+    2. Identificação de pontos de atenção (ex.: categorias com maiores despesas).
+    3. 3 dicas práticas e acionáveis de economia personalizada.
+    Mantenha o tom profissional, motivador e responda em Português do Brasil.
+    """
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        return {"analise": response.text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar análise com IA: {str(e)}")

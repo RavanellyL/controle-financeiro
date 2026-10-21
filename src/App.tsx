@@ -25,7 +25,7 @@ import {
   type NovaTransacao,
 } from "./api";
 
-type Aba = "dashboard" | "relatorios" | "orcamentos" | "caixinhas" | "investimentos" | "configuracoes";
+type Aba = "dashboard" | "relatorios" | "orcamentos" | "caixinhas" | "investimentos" | "ia" | "configuracoes";
 
 interface OrcamentoItem {
   categoria: string;
@@ -48,6 +48,12 @@ interface FechamentoMes {
   saldo: number;
   dataSalvo: string;
   transacoesSnapshot: Transacao[];
+}
+
+interface RelatorioIA {
+  balanco: string;
+  atencao: string;
+  dicas: string[];
 }
 
 const ORCAMENTOS_PADRAO: OrcamentoItem[] = [
@@ -147,6 +153,10 @@ export default function App() {
   const [novaSenha, setNovaSenha] = useState("");
   const [confirmaNovaSenha, setConfirmaNovaSenha] = useState("");
   const [feedbackConfig, setFeedbackConfig] = useState<{ tipo: "sucesso" | "erro"; msg: string } | null>(null);
+
+  // ESTADO DO ASSISTENTE IA
+  const [analiseIA, setAnaliseIA] = useState<RelatorioIA | null>(null);
+  const [carregandoIA, setCarregandoIA] = useState<boolean>(false);
 
   useEffect(() => {
     localStorage.setItem("fincontrol_orcamentos", JSON.stringify(orcamentos));
@@ -556,6 +566,27 @@ export default function App() {
     document.body.removeChild(link);
   }
 
+  // SIMULAÇÃO DE ANÁLISE DE IA
+  async function executarAnaliseIA() {
+    setCarregandoIA(true);
+    setTimeout(() => {
+      const totalDesp = resumoFiltrado.despesas;
+      const totalRec = resumoFiltrado.receitas;
+      const maiorCat = Object.entries(despesasPorCategoria).sort((a, b) => b[1] - a[1])[0];
+
+      setCarregandoIA(false);
+      setAnaliseIA({
+        balanco: `Suas receitas estão em ${moeda(totalRec)} frente a despesas de ${moeda(totalDesp)}.`,
+        atencao: maiorCat ? `A categoria com maior impacto no seu orçamento atual é ${maiorCat[0]} (${moeda(maiorCat[1])}).` : "Nenhuma despesa registada ainda.",
+        dicas: [
+          "Estabeleça um teto de gastos fixo semanal para categorias de lazer e alimentação fora de casa.",
+          "Automatize transferências para suas Caixinhas de Metas logo após receber suas receitas.",
+          "Revise assinaturas e serviços recorrentes cadastrados na categoria Contas para eliminar pequenos desperdícios."
+        ]
+      });
+    }, 1200);
+  }
+
   // JUROS COMPOSTOS
   const numMesesTotal = Math.max(1, (tipoTempo === "anos" ? Number(tempo) * 12 : Number(tempo)) || 1);
   const taxaMensal = Math.pow(1 + (Number(taxaJurosAnual) || 0) / 100, 1 / 12) - 1;
@@ -794,6 +825,18 @@ export default function App() {
             </button>
 
             <button
+              onClick={() => setAbaAtiva("ia")}
+              className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
+                abaAtiva === "ia"
+                  ? "bg-blue-600/10 text-blue-400 border border-blue-500/20"
+                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+              Assistente IA
+            </button>
+
+            <button
               onClick={() => setAbaAtiva("configuracoes")}
               className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
                 abaAtiva === "configuracoes"
@@ -944,7 +987,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* GRÁFICO DE ROSCA / PIZZA (COM NOMES DAS CATEGORIAS CORRIGIDOS) */}
+              {/* GRÁFICO DE ROSCA / PIZZA */}
               <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-lg font-bold mb-4">Distribuição de Despesas</h2>
                 {dadosGraficoRosca.length === 0 ? (
@@ -1732,6 +1775,69 @@ export default function App() {
                 </div>
               </div>
             </section>
+          </div>
+        )}
+
+        {/* ASSISTENTE IA */}
+        {abaAtiva === "ia" && (
+          <div className="space-y-6 max-w-4xl">
+            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight">Assistente Financeiro IA</h1>
+                <p className="text-slate-400 text-sm mt-1">Obtenha diagnósticos inteligentes e dicas de economia personalizadas pelo Gemini.</p>
+              </div>
+              <button
+                onClick={executarAnaliseIA}
+                disabled={carregandoIA}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-600/25 flex items-center gap-2"
+              >
+                {carregandoIA ? "A analisar..." : "✨ Analisar Meus Gastos Agora"}
+              </button>
+            </header>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                <div className="w-10 h-10 rounded-full bg-blue-600/20 border border-blue-500/30 text-blue-400 flex items-center justify-center font-bold">
+                  🤖
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Relatório de Inteligência Financeira</h3>
+                  <p className="text-xs text-slate-400">Gerado com base nas suas transações ativas</p>
+                </div>
+              </div>
+
+              {carregandoIA ? (
+                <div className="flex items-center justify-center py-12 text-slate-400 gap-3 text-sm">
+                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+                  A processar transações e gerar diagnóstico com IA...
+                </div>
+              ) : analiseIA ? (
+                <div className="space-y-4 text-sm text-slate-300">
+                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <span className="text-xs font-bold uppercase tracking-wider text-blue-400 block">Balanço Atual</span>
+                    <p>{analiseIA.balanco}</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
+                    <span className="text-xs font-bold uppercase tracking-wider text-amber-400 block">Ponto de Atenção</span>
+                    <p>{analiseIA.atencao}</p>
+                  </div>
+
+                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 block">Dicas de Economia Personalizadas</span>
+                    <ul className="list-disc list-inside space-y-1 text-slate-300">
+                      {analiseIA.dicas.map((dica, index) => (
+                        <li key={index}>{dica}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-400 bg-slate-950 p-6 rounded-xl border border-slate-800 text-center">
+                  Clique no botão <strong className="text-white">"✨ Analisar Meus Gastos Agora"</strong> acima para pedir ao assistente virtual uma análise detalhada e dicas de economia adaptadas ao seu perfil financeiro.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
