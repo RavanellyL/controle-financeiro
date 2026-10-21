@@ -8,6 +8,9 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  PieChart,
+  Pie,
+  Legend,
 } from "recharts";
 import {
   listarTransacoes,
@@ -22,7 +25,7 @@ import {
   type NovaTransacao,
 } from "./api";
 
-type Aba = "dashboard" | "relatorios" | "categorias" | "orcamentos" | "caixinhas" | "investimentos" | "configuracoes";
+type Aba = "dashboard" | "relatorios" | "orcamentos" | "caixinhas" | "investimentos" | "configuracoes";
 
 interface OrcamentoItem {
   categoria: string;
@@ -64,6 +67,11 @@ const CAIXINHAS_PADRAO: CaixinhaItem[] = [
   { id: "3", nome: "Troca do Carro", meta: 25000, guardado: 6000, cor: "bg-purple-500" },
 ];
 
+const CORES_GRAFICO_PIZZA = [
+  "#f43f5e", "#3b82f6", "#10b981", "#f59e0b",
+  "#8b5cf6", "#06b6d4", "#ec4899", "#64748b", "#84cc16"
+];
+
 export default function App() {
   const [token, setToken] = useState<string | null>(obterToken());
   const [modoAuth, setModoAuth] = useState<"login" | "cadastro">("login");
@@ -91,7 +99,7 @@ export default function App() {
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
 
-  // FILTROS AVANÇADOS DE DATA E BUSCA
+  // FILTROS AVANÇADOS DE DATA, TIPO, CATEGORIA E BUSCA
   const [filtroPeriodo, setFiltroPeriodo] = useState<"tudo" | "7dias" | "esteMes" | "anoAtual" | "custom">("tudo");
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
@@ -252,7 +260,7 @@ export default function App() {
     setFotoPerfil(null);
   }
 
-  // LÓGICA DE FILTRAGEM POR PERÍODO PERSONALIZADO
+  // FILTRAGEM DE TRANSAÇÕES
   const transacoesFiltradas = transacoes.filter((t) => {
     const dataTrans = new Date(t.data.slice(0, 10));
     const hoje = new Date();
@@ -305,6 +313,32 @@ export default function App() {
     { nome: "Receitas", valor: resumoFiltrado.receitas, cor: "#10b981" },
     { nome: "Despesas", valor: resumoFiltrado.despesas, cor: "#f43f5e" },
   ];
+
+  const despesasPorCategoria = transacoesFiltradas
+    .filter((t) => t.tipo === "despesa")
+    .reduce((acc, t) => {
+      acc[t.categoria] = (acc[t.categoria] || 0) + Number(t.valor);
+      return acc;
+    }, {} as Record<string, number>);
+
+  const dadosGraficoRosca = Object.entries(despesasPorCategoria).map(([nome, valor]) => ({
+    nome,
+    valor,
+  }));
+
+  // ALERTAS DE ORÇAMENTO (80% E 100%)
+  const alertasOrcamento = orcamentos
+    .map((o) => {
+      const gasto = despesasPorCategoria[o.categoria] || 0;
+      const pct = (gasto / o.limite) * 100;
+      if (pct >= 100) {
+        return { categoria: o.categoria, tipo: "estourou" as const, pct, gasto, limite: o.limite };
+      } else if (pct >= 80) {
+        return { categoria: o.categoria, tipo: "alerta" as const, pct, gasto, limite: o.limite };
+      }
+      return null;
+    })
+    .filter(Boolean);
 
   function limparFormulario() {
     setDescricao("");
@@ -389,13 +423,6 @@ export default function App() {
     setBuscaTexto("");
   }
 
-  const despesasPorCategoria = transacoesFiltradas
-    .filter((t) => t.tipo === "despesa")
-    .reduce((acc, t) => {
-      acc[t.categoria] = (acc[t.categoria] || 0) + Number(t.valor);
-      return acc;
-    }, {} as Record<string, number>);
-
   function iniciarEdicaoOrcamento(cat: string, limiteAtual: number) {
     setCategoriaEditando(cat);
     setNovoLimiteInput(String(limiteAtual));
@@ -462,7 +489,7 @@ export default function App() {
     setCaixinhas((prev) => prev.filter((item) => item.id !== id));
   }
 
-  // HISTÓRICO DE MESES & DOWNLOAD NO COMPUTADOR
+  // HISTÓRICO DE MESES & EXPORTAÇÕES
   function salvarFechamentoMesAtual() {
     const hoje = new Date();
     const mesAno = hoje.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
@@ -728,20 +755,8 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => setAbaAtiva("categorias")}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
-                abaAtiva === "categorias"
-                  ? "bg-blue-600/10 text-blue-400 border border-blue-500/20"
-                  : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
-              }`}
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
-              Categorias
-            </button>
-
-            <button
               onClick={() => setAbaAtiva("orcamentos")}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left ${
+              className={`w-full flex items-center gap-3 px-4 py-2.5 font-semibold rounded-xl transition-all text-left relative ${
                 abaAtiva === "orcamentos"
                   ? "bg-blue-600/10 text-blue-400 border border-blue-500/20"
                   : "text-slate-400 hover:text-slate-100 hover:bg-slate-800/50"
@@ -749,6 +764,9 @@ export default function App() {
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               Orçamentos
+              {alertasOrcamento.length > 0 && (
+                <span className="absolute right-3 w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" />
+              )}
             </button>
 
             <button
@@ -825,7 +843,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: PAINEL / DASHBOARD */}
+        {/* PAINEL / DASHBOARD */}
         {abaAtiva === "dashboard" && (
           <>
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -834,6 +852,40 @@ export default function App() {
                 <p className="text-slate-400 text-sm mt-1">Acompanhe as suas finanças pessoais em tempo real.</p>
               </div>
             </header>
+
+            {/* PAINEL DE ALERTAS DE ORÇAMENTO */}
+            {alertasOrcamento.length > 0 && (
+              <section className="space-y-2 print:hidden">
+                {alertasOrcamento.map((item) => (
+                  <div
+                    key={item!.categoria}
+                    className={`p-4 rounded-xl border flex items-center justify-between text-sm font-medium transition-all ${
+                      item!.tipo === "estourou"
+                        ? "bg-rose-500/10 border-rose-500/30 text-rose-300"
+                        : "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg">
+                        {item!.tipo === "estourou" ? "🚨" : "⚠️"}
+                      </span>
+                      <div>
+                        <strong>{item!.categoria}:</strong>{" "}
+                        {item!.tipo === "estourou"
+                          ? `Limite excedido! Gasto de ${moeda(item!.gasto)} superou a meta de ${moeda(item!.limite)}.`
+                          : `Alerta de gastos! Atingiu ${item!.pct.toFixed(0)}% do orçamento (${moeda(item!.gasto)} de ${moeda(item!.limite)}).`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setAbaAtiva("orcamentos")}
+                      className="text-xs bg-slate-900/80 hover:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 transition-all font-semibold"
+                    >
+                      Ajustar Meta
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
 
             {erro && (
               <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 rounded-xl">
@@ -861,11 +913,12 @@ export default function App() {
               </div>
             </section>
 
-            {/* GRÁFICO E FORMULÁRIO */}
+            {/* GRÁFICOS: BARRAS E ROSCA (PIZZA) */}
             <section className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              {/* GRÁFICO DE BARRAS */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
                 <h2 className="text-lg font-bold mb-4">Receitas vs. Despesas</h2>
-                <div className="h-72 w-full">
+                <div className="h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={dadosGrafico} margin={{ top: 20, right: 20, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -881,7 +934,7 @@ export default function App() {
                         }}
                         formatter={(value) => [moeda(Number(value)), "Valor"]}
                       />
-                      <Bar dataKey="valor" radius={[12, 12, 0, 0]} barSize={60}>
+                      <Bar dataKey="valor" radius={[12, 12, 0, 0]} barSize={50}>
                         {dadosGrafico.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={entry.cor} />
                         ))}
@@ -889,6 +942,52 @@ export default function App() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+              </div>
+
+              {/* GRÁFICO DE ROSCA / PIZZA (COM NOMES DAS CATEGORIAS CORRIGIDOS) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+                <h2 className="text-lg font-bold mb-4">Distribuição de Despesas</h2>
+                {dadosGraficoRosca.length === 0 ? (
+                  <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
+                    Nenhuma despesa para exibir no gráfico.
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={dadosGraficoRosca}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={3}
+                          dataKey="valor"
+                          nameKey="nome"
+                        >
+                          {dadosGraficoRosca.map((_, index) => (
+                            <Cell key={`cell-${index}`} fill={CORES_GRAFICO_PIZZA[index % CORES_GRAFICO_PIZZA.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#0f172a",
+                            borderColor: "#334155",
+                            borderRadius: "12px",
+                            color: "#f8fafc",
+                          }}
+                          formatter={(value) => [moeda(Number(value)), "Gasto"]}
+                        />
+                        <Legend
+                          verticalAlign="bottom"
+                          height={40}
+                          iconType="circle"
+                          formatter={(value) => <span className="text-xs text-slate-300 font-medium">{value}</span>}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
 
               {/* FORMULÁRIO */}
@@ -990,7 +1089,7 @@ export default function App() {
               </div>
             </section>
 
-            {/* TABELA DE TRANSAÇÕES */}
+            {/* TABELA DE TRANSAÇÕES COM FILTRO DE CATEGORIA */}
             <section className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <h2 className="text-lg font-bold">Histórico de Transações</h2>
@@ -1003,6 +1102,34 @@ export default function App() {
                     onChange={(e) => setBuscaTexto(e.target.value)}
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
                   />
+
+                  {/* FILTRO DE CATEGORIA */}
+                  <select
+                    value={filtroCategoria}
+                    onChange={(e) => setFiltroCategoria(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+                  >
+                    <option value="Todas">Todas as Categorias</option>
+                    <option value="Trabalho">Trabalho</option>
+                    <option value="Moradia">Moradia</option>
+                    <option value="Alimentação">Alimentação</option>
+                    <option value="Transporte">Transporte</option>
+                    <option value="Saúde">Saúde</option>
+                    <option value="Educação">Educação</option>
+                    <option value="Lazer">Lazer</option>
+                    <option value="Contas">Contas</option>
+                    <option value="Outros">Outros</option>
+                  </select>
+
+                  <select
+                    value={filtroTipo}
+                    onChange={(e) => setFiltroTipo(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+                  >
+                    <option value="todos">Todos os Tipos</option>
+                    <option value="receita">Apenas Receitas</option>
+                    <option value="despesa">Apenas Despesas</option>
+                  </select>
 
                   <select
                     value={filtroPeriodo}
@@ -1046,7 +1173,7 @@ export default function App() {
               {carregando ? (
                 <p className="text-slate-400 text-sm">A carregar transações...</p>
               ) : transacoesFiltradas.length === 0 ? (
-                <p className="text-slate-400 text-sm">Nenhuma transação encontrada para este período.</p>
+                <p className="text-slate-400 text-sm">Nenhuma transação encontrada para este período/filtro.</p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
@@ -1110,7 +1237,7 @@ export default function App() {
           </>
         )}
 
-        {/* ABA: RELATÓRIOS & FECHAMENTO MENSAL */}
+        {/* RELATÓRIOS & FECHAMENTO MENSAL */}
         {abaAtiva === "relatorios" && (
           <div className="space-y-6">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
@@ -1136,7 +1263,7 @@ export default function App() {
                   onClick={exportarPDF}
                   className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-blue-600/20"
                 >
-                  Exportar PDF
+                  Gerar PDF
                 </button>
               </div>
             </header>
@@ -1222,7 +1349,6 @@ export default function App() {
                 </button>
               </div>
 
-              {/* RESUMO DO MÊS */}
               <div className="grid grid-cols-3 gap-4 text-center">
                 <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl print:border-gray-300 print:bg-gray-50">
                   <span className="text-xs text-slate-400 print:text-gray-600 block uppercase font-semibold">Receitas</span>
@@ -1240,7 +1366,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* LISTA DE TRANSAÇÕES DO FECHAMENTO */}
               <div className="space-y-3">
                 <h3 className="text-sm font-bold uppercase text-slate-400 print:text-gray-800">Transações Registadas</h3>
 
@@ -1298,34 +1423,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: CATEGORIAS */}
-        {abaAtiva === "categorias" && (
-          <div className="space-y-6">
-            <header>
-              <h1 className="text-3xl font-bold tracking-tight">Categorias FinControl</h1>
-              <p className="text-slate-400 text-sm mt-1">Categorias predefinidas para classificar as suas receitas e despesas.</p>
-            </header>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-              {["Trabalho", "Moradia", "Alimentação", "Transporte", "Saúde", "Educação", "Lazer", "Contas", "Outros"].map((cat) => {
-                const num = transacoes.filter((t) => t.categoria === cat).length;
-                return (
-                  <div key={cat} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-base">{cat}</h3>
-                      <p className="text-xs text-slate-400 mt-0.5">{num} {num === 1 ? "transação" : "transações"}</p>
-                    </div>
-                    <div className="w-9 h-9 bg-blue-600/10 text-blue-400 rounded-xl flex items-center justify-center font-bold text-sm">
-                      {cat.slice(0, 1)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* ABA: ORÇAMENTOS */}
+        {/* ORÇAMENTOS COM ALERTAS DESTACADOS */}
         {abaAtiva === "orcamentos" && (
           <div className="space-y-6">
             <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1340,14 +1438,23 @@ export default function App() {
                 const gasto = despesasPorCategoria[cat] || 0;
                 const pct = Math.min((gasto / limite) * 100, 100);
                 const estourou = gasto > limite;
+                const emAlerta = pct >= 80 && !estourou;
                 const estaEditando = categoriaEditando === cat;
 
                 return (
-                  <div key={cat} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div key={cat} className={`bg-slate-900 border rounded-2xl p-6 space-y-4 transition-all ${
+                    estourou ? "border-rose-500/50 shadow-rose-500/5 shadow-md" : emAlerta ? "border-amber-500/50 shadow-amber-500/5 shadow-md" : "border-slate-800"
+                  }`}>
                     <div className="flex justify-between items-center">
                       <h3 className="font-bold text-lg text-white">{cat}</h3>
-                      <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${estourou ? "bg-rose-500/10 text-rose-400 border border-rose-500/20" : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"}`}>
-                        {estourou ? "Limite excedido" : "Dentro do limite"}
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${
+                        estourou
+                          ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                          : emAlerta
+                          ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                          : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      }`}>
+                        {estourou ? "Limite excedido" : emAlerta ? "Atenção (≥80%)" : "Dentro do limite"}
                       </span>
                     </div>
 
@@ -1393,7 +1500,9 @@ export default function App() {
 
                     <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all duration-500 ${estourou ? "bg-rose-500" : "bg-blue-500"}`}
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          estourou ? "bg-rose-500" : emAlerta ? "bg-amber-500" : "bg-blue-500"
+                        }`}
                         style={{ width: `${pct}%` }}
                       ></div>
                     </div>
@@ -1404,7 +1513,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: METAS & CAIXINHAS */}
+        {/* METAS & CAIXINHAS */}
         {abaAtiva === "caixinhas" && (
           <div className="space-y-8">
             <header>
@@ -1506,7 +1615,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: INVESTIMENTOS */}
+        {/* INVESTIMENTOS */}
         {abaAtiva === "investimentos" && (
           <div className="space-y-8">
             <header>
@@ -1626,7 +1735,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA: CONFIGURAÇÕES */}
+        {/* CONFIGURAÇÕES */}
         {abaAtiva === "configuracoes" && (
           <div className="space-y-8 max-w-4xl">
             <header>
