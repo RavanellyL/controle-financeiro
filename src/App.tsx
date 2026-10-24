@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -102,11 +102,11 @@ export default function App() {
 
   const [erro, setErro] = useState("");
   const [mensagemSucesso, setMensagemSucesso] = useState("");
-  const [carregando, setCarregando] = useState(true);
+  const [carregando, setCarregando] = useState(() => Boolean(obterToken()));
   const [salvando, setSalvando] = useState(false);
 
-  // FILTROS AVANÇADOS DE DATA, TIPO, CATEGORIA E BUSCA
-  const [filtroPeriodo, setFiltroPeriodo] = useState<"tudo" | "7dias" | "esteMes" | "anoAtual" | "custom">("tudo");
+  // FILTROS AVANÇADOS
+  const [filtroPeriodo, setFiltroPeriodo] = useState<"tudo" | "7dias" | "esteMes" | "anoAtual" | "custom">("esteMes");
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
   const [filtroCategoria, setFiltroCategoria] = useState("Todas");
@@ -145,8 +145,8 @@ export default function App() {
   const [tipoTempo, setTipoTempo] = useState<"anos" | "meses">("anos");
 
   // CONFIGURAÇÕES DA CONTA, PERFIL E IMAGEM
-  const [nomeUsuario, setNomeUsuario] = useState(() => localStorage.getItem("fincontrol_nome_usuario") || "Ravanelly Lima");
-  const [cargoUsuario, setCargoUsuario] = useState(() => localStorage.getItem("fincontrol_cargo_usuario") || "Desenvolvedor");
+  const [nomeUsuario, setNomeUsuario] = useState(() => localStorage.getItem("fincontrol_nome_usuario") || "Utilizador");
+  const [cargoUsuario, setCargoUsuario] = useState(() => localStorage.getItem("fincontrol_cargo_usuario") || "Gestor Financeiro");
   const [fotoPerfil, setFotoPerfil] = useState<string | null>(() => localStorage.getItem("fincontrol_foto_perfil"));
 
   const [senhaAtual, setSenhaAtual] = useState("");
@@ -204,32 +204,32 @@ export default function App() {
     return `${dia}/${mes}/${ano}`;
   }
 
-  async function atualizarDados() {
-    if (!token) return;
-    try {
-      const lista = await listarTransacoes();
-      setTransacoes(lista);
-      setErro("");
-    } catch {
-      setErro("Sessão expirada ou falha ao conectar com o backend.");
-      fazerLogout();
-    } finally {
-      setCarregando(false);
-    }
-  }
+  const atualizarDados = useCallback(async () => {
+  if (!token) return;
+
+  try {
+    const lista = await listarTransacoes();
+    setTransacoes(lista);
+    setErro("");
+   } catch {
+    setErro("Sessão expirada ou falha ao conectar com o backend.");
+    fazerLogout();
+   } finally {
+    setCarregando(false);
+   }
+  }, [token]);
 
   useEffect(() => {
-    if (token) {
-      atualizarDados();
-    } else {
-      setCarregando(false);
-    }
-  }, [token]);
+  if (token) {
+    void atualizarDados();
+   }
+  }, [token, atualizarDados]);
 
   function fazerLogout() {
     removerToken();
     setToken(null);
     setTransacoes([]);
+    setCarregando(false);
   }
 
   async function handleAuth(e: React.FormEvent) {
@@ -247,7 +247,7 @@ export default function App() {
         setToken(tokenRecebido);
       }
     } catch (err: any) {
-      setErro(err.message || "Falha na autenticação.");
+      setErro(err?.message || "Falha na autenticação.");
     }
   }
 
@@ -393,7 +393,7 @@ export default function App() {
       categoria,
       tipo,
       valor: valorNumerico,
-      ...(dataTransacao ? { data: dataTransacao } : {}),
+      data: dataTransacao || new Date().toISOString().slice(0, 10),
     };
 
     setSalvando(true);
@@ -425,7 +425,7 @@ export default function App() {
   }
 
   function limparFiltros() {
-    setFiltroPeriodo("tudo");
+    setFiltroPeriodo("esteMes");
     setDataInicio("");
     setDataFim("");
     setFiltroCategoria("Todas");
@@ -566,25 +566,42 @@ export default function App() {
     document.body.removeChild(link);
   }
 
-  // SIMULAÇÃO DE ANÁLISE DE IA
   async function executarAnaliseIA() {
     setCarregandoIA(true);
-    setTimeout(() => {
-      const totalDesp = resumoFiltrado.despesas;
-      const totalRec = resumoFiltrado.receitas;
-      const maiorCat = Object.entries(despesasPorCategoria).sort((a, b) => b[1] - a[1])[0];
+    try {
+      setTimeout(() => {
+        const totalDesp = resumoFiltrado?.despesas || 0;
+        const totalRec = resumoFiltrado?.receitas || 0;
+        
+        let maiorCatNome = "Nenhuma";
+        let maiorCatValor = 0;
 
+        if (despesasPorCategoria && Object.keys(despesasPorCategoria).length > 0) {
+          const entries = Object.entries(despesasPorCategoria).sort((a, b) => b[1] - a[1]);
+          if (entries.length > 0) {
+            maiorCatNome = entries[0][0];
+            maiorCatValor = entries[0][1];
+          }
+        }
+
+        setAnaliseIA({
+          balanco: `As suas receitas atuais registadas estão em ${moeda(totalRec)} frente a despesas totais de ${moeda(totalDesp)}.`,
+          atencao: maiorCatValor > 0 
+            ? `A categoria com maior impacto no orçamento é "${maiorCatNome}" totalizando ${moeda(maiorCatValor)}.`
+            : "Ainda não existem despesas registadas para análise de impacto.",
+          dicas: [
+            "Estabeleça um teto de gastos fixo semanal para categorias de lazer e alimentação fora de casa.",
+            "Automatize transferências para as suas Caixinhas de Metas logo após receber as suas receitas.",
+            "Revise assinaturas e serviços recorrentes cadastrados na categoria Contas para eliminar pequenos desperdícios."
+          ]
+        });
+        setCarregandoIA(false);
+      }, 1000);
+    } catch (err) {
+      console.error("Erro na IA:", err);
       setCarregandoIA(false);
-      setAnaliseIA({
-        balanco: `Suas receitas estão em ${moeda(totalRec)} frente a despesas de ${moeda(totalDesp)}.`,
-        atencao: maiorCat ? `A categoria com maior impacto no seu orçamento atual é ${maiorCat[0]} (${moeda(maiorCat[1])}).` : "Nenhuma despesa registada ainda.",
-        dicas: [
-          "Estabeleça um teto de gastos fixo semanal para categorias de lazer e alimentação fora de casa.",
-          "Automatize transferências para suas Caixinhas de Metas logo após receber suas receitas.",
-          "Revise assinaturas e serviços recorrentes cadastrados na categoria Contas para eliminar pequenos desperdícios."
-        ]
-      });
-    }, 1200);
+      alert("Ocorreu um erro ao gerar a análise.");
+    }
   }
 
   // JUROS COMPOSTOS
@@ -606,7 +623,6 @@ export default function App() {
     { nome: "Juros Compostos", valor: totalJuros, cor: "#10b981" },
   ];
 
-  // AÇÕES DAS CONFIGURAÇÕES
   function handleAlterarSenha(e: React.FormEvent) {
     e.preventDefault();
     setFeedbackConfig(null);
@@ -636,7 +652,7 @@ export default function App() {
   if (!token) {
     return (
       <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col justify-center items-center p-4">
-        <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl">
+        <div className="w-full max-w-md bg-slate-800 border border-slate-700 rounded-2xl p-8 shadow-2xl relative z-10">
           <div className="text-center mb-8">
             <h1 className="text-3xl font-extrabold text-blue-500 tracking-tight">FinControl</h1>
             <p className="text-slate-400 text-sm mt-2">
@@ -686,7 +702,7 @@ export default function App() {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/30"
+              className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/30 cursor-pointer"
             >
               {modoAuth === "login" ? "Entrar na plataforma" : "Criar conta gratuita"}
             </button>
@@ -699,7 +715,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => { setModoAuth("cadastro"); setErro(""); }}
-                  className="text-blue-400 font-semibold hover:underline"
+                  className="text-blue-400 font-semibold hover:underline cursor-pointer"
                 >
                   Registe-se
                 </button>
@@ -710,7 +726,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => { setModoAuth("login"); setErro(""); }}
-                  className="text-blue-400 font-semibold hover:underline"
+                  className="text-blue-400 font-semibold hover:underline cursor-pointer"
                 >
                   Voltar ao login
                 </button>
@@ -853,7 +869,7 @@ export default function App() {
         <div className="pt-6 border-t border-slate-800">
           <button
             onClick={fazerLogout}
-            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-red-400 transition-colors"
+            className="w-full flex items-center gap-3 px-4 py-2 text-sm text-slate-400 hover:text-red-400 transition-colors cursor-pointer"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
             Sair da conta
@@ -868,7 +884,7 @@ export default function App() {
           <div className="flex justify-end items-center mb-2 print:hidden">
             <button
               onClick={() => setOcultarValores(!ocultarValores)}
-              className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all shadow-sm"
+              className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 transition-all shadow-sm cursor-pointer"
               title={ocultarValores ? "Mostrar valores" : "Ocultar valores (Privacidade)"}
             >
               {ocultarValores ? (
@@ -921,7 +937,7 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => setAbaAtiva("orcamentos")}
-                      className="text-xs bg-slate-900/80 hover:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 transition-all font-semibold"
+                      className="text-xs bg-slate-900/80 hover:bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-700 transition-all font-semibold cursor-pointer"
                     >
                       Ajustar Meta
                     </button>
@@ -1114,7 +1130,7 @@ export default function App() {
                   <button
                     type="submit"
                     disabled={salvando}
-                    className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition-all text-sm shadow-md shadow-blue-600/20"
+                    className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-semibold py-2.5 rounded-xl transition-all text-sm shadow-md shadow-blue-600/20 cursor-pointer"
                   >
                     {salvando ? "A salvar..." : editandoId !== null ? "Salvar Alterações" : "Adicionar Transação"}
                   </button>
@@ -1123,7 +1139,7 @@ export default function App() {
                     <button
                       type="button"
                       onClick={limparFormulario}
-                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-sm transition-all"
+                      className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-sm transition-all cursor-pointer"
                     >
                       Cancelar Edição
                     </button>
@@ -1146,7 +1162,6 @@ export default function App() {
                     className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
                   />
 
-                  {/* FILTRO DE CATEGORIA */}
                   <select
                     value={filtroCategoria}
                     onChange={(e) => setFiltroCategoria(e.target.value)}
@@ -1206,7 +1221,7 @@ export default function App() {
 
                   <button
                     onClick={limparFiltros}
-                    className="text-xs text-slate-400 hover:text-white transition-colors"
+                    className="text-xs text-slate-400 hover:text-white transition-colors cursor-pointer"
                   >
                     Limpar
                   </button>
@@ -1258,14 +1273,14 @@ export default function App() {
                             <button
                               onClick={() => prepararEdicao(t)}
                               title="Editar"
-                              className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition-colors inline-flex items-center"
+                              className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition-colors inline-flex items-center cursor-pointer"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                             </button>
                             <button
                               onClick={() => excluir(t.id)}
                               title="Excluir"
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors inline-flex items-center"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors inline-flex items-center cursor-pointer"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                             </button>
@@ -1292,19 +1307,19 @@ export default function App() {
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={salvarFechamentoMesAtual}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-emerald-600/20"
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-emerald-600/20 cursor-pointer"
                 >
                   + Salvar Mês Atual
                 </button>
                 <button
                   onClick={exportarCSV}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer"
                 >
                   Exportar CSV
                 </button>
                 <button
                   onClick={exportarPDF}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-blue-600/20"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all shadow-md shadow-blue-600/20 cursor-pointer"
                 >
                   Gerar PDF
                 </button>
@@ -1386,7 +1401,7 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => setMesSelecionadoModal(null)}
-                  className="text-slate-400 hover:text-white p-1 text-lg font-bold print:hidden"
+                  className="text-slate-400 hover:text-white p-1 text-lg font-bold print:hidden cursor-pointer"
                 >
                   ✕
                 </button>
@@ -1451,13 +1466,13 @@ export default function App() {
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-800 print:hidden">
                 <button
                   onClick={exportarPDF}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer"
                 >
                   Imprimir / Salvar PDF
                 </button>
                 <button
                   onClick={() => setMesSelecionadoModal(null)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs px-4 py-2 rounded-xl transition-all"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs px-4 py-2 rounded-xl transition-all cursor-pointer"
                 >
                   Fechar
                 </button>
@@ -1516,13 +1531,13 @@ export default function App() {
                           />
                           <button
                             onClick={() => salvarOrcamento(cat)}
-                            className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1 rounded-lg transition-all"
+                            className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer"
                           >
                             Salvar
                           </button>
                           <button
                             onClick={() => setCategoriaEditando(null)}
-                            className="text-slate-400 hover:text-white text-xs"
+                            className="text-slate-400 hover:text-white text-xs cursor-pointer"
                           >
                             X
                           </button>
@@ -1533,7 +1548,7 @@ export default function App() {
                           <button
                             onClick={() => iniciarEdicaoOrcamento(cat, limite)}
                             title="Editar Meta"
-                            className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-md transition-colors"
+                            className="p-1 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-md transition-colors cursor-pointer"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                           </button>
@@ -1594,7 +1609,7 @@ export default function App() {
                 <div className="flex items-end">
                   <button
                     type="submit"
-                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded-xl text-sm transition-all shadow-md shadow-blue-600/20"
+                    className="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2 rounded-xl text-sm transition-all shadow-md shadow-blue-600/20 cursor-pointer"
                   >
                     + Adicionar Meta
                   </button>
@@ -1613,7 +1628,7 @@ export default function App() {
                         <h3 className="font-bold text-lg text-white">{item.nome}</h3>
                         <button
                           onClick={() => excluirCaixinha(item.id)}
-                          className="text-slate-500 hover:text-rose-400 transition-colors p-1"
+                          className="text-slate-500 hover:text-rose-400 transition-colors p-1 cursor-pointer"
                           title="Excluir caixinha"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -1646,7 +1661,7 @@ export default function App() {
                       />
                       <button
                         onClick={() => depositarCaixinha(item.id)}
-                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-xl transition-all whitespace-nowrap"
+                        className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-3 py-1.5 rounded-xl transition-all whitespace-nowrap cursor-pointer"
                       >
                         Guardar
                       </button>
@@ -1789,7 +1804,7 @@ export default function App() {
               <button
                 onClick={executarAnaliseIA}
                 disabled={carregandoIA}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-600/25 flex items-center gap-2"
+                className="bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md shadow-blue-600/25 flex items-center gap-2 cursor-pointer"
               >
                 {carregandoIA ? "A analisar..." : "✨ Analisar Meus Gastos Agora"}
               </button>
@@ -1905,7 +1920,7 @@ export default function App() {
                     {fotoPerfil && (
                       <button
                         onClick={removerFoto}
-                        className="bg-slate-800 hover:bg-rose-600/20 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 font-semibold text-xs px-3 py-2 rounded-xl transition-all"
+                        className="bg-slate-800 hover:bg-rose-600/20 text-slate-300 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 font-semibold text-xs px-3 py-2 rounded-xl transition-all cursor-pointer"
                       >
                         Remover Foto
                       </button>
@@ -2001,17 +2016,12 @@ export default function App() {
                 <div className="flex justify-end pt-2">
                   <button
                     type="submit"
-                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl transition-all text-sm shadow-md shadow-blue-600/20"
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-5 py-2.5 rounded-xl transition-all text-sm shadow-md shadow-blue-600/20 cursor-pointer"
                   >
                     Atualizar Senha
                   </button>
                 </div>
               </form>
-
-              <div className="pt-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-400">
-                <span>Proteção de Sessão: <strong className="text-emerald-400">Bearer Token JWT (Algoritmo HS256)</strong></span>
-                <span className="bg-slate-800 px-2.5 py-1 rounded-md font-mono text-slate-300">Sessão Ativa</span>
-              </div>
             </div>
 
             {/* SEÇÃO 3: PRIVACIDADE & BACKUP DE DADOS */}
@@ -2031,13 +2041,13 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={exportarCSV}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1.5"
+                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3.5 py-2 rounded-xl text-xs transition-all border border-slate-700 flex items-center gap-1.5 cursor-pointer"
                   >
                     CSV (Excel)
                   </button>
                   <button
                     onClick={exportarDadosJSON}
-                    className="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all shadow-md shadow-purple-600/20 flex items-center gap-1.5"
+                    className="bg-purple-600 hover:bg-purple-500 text-white font-semibold px-3.5 py-2 rounded-xl text-xs transition-all shadow-md shadow-purple-600/20 flex items-center gap-1.5 cursor-pointer"
                   >
                     JSON (Backup)
                   </button>
@@ -2060,7 +2070,7 @@ export default function App() {
               <div className="pt-2 flex justify-start">
                 <button
                   onClick={fazerLogout}
-                  className="bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 font-semibold px-5 py-2.5 rounded-xl transition-all text-sm"
+                  className="bg-rose-600/10 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 font-semibold px-5 py-2.5 rounded-xl transition-all text-sm cursor-pointer"
                 >
                   Encerrar Sessão no FinControl
                 </button>

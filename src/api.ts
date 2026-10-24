@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:8000";
+const API_URL = "/api";
 
 export interface Transacao {
   id: number;
@@ -32,7 +32,7 @@ function cabecalhosAutenticados() {
   };
 }
 
-export async function cadastrarUsuario(email: string, senha: str) {
+export async function cadastrarUsuario(email: string, senha: string) {
   const resposta = await fetch(`${API_URL}/cadastrar`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,7 +47,7 @@ export async function cadastrarUsuario(email: string, senha: str) {
   return resposta.json();
 }
 
-export async function fazerLogin(username: string, password: str) {
+export async function fazerLogin(username: string, password: string) {
   const formData = new URLSearchParams();
   formData.append("username", username);
   formData.append("password", password);

@@ -3,10 +3,10 @@ import psycopg
 from psycopg.rows import dict_row
 
 # Conexão direta com o PostgreSQL local da tua máquina
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://postgres:270324@localhost:5432/controle_financeiro"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not DATABASE_URL:
+    raise RuntimeError("A variável DATABASE_URL não foi configurada.")
 
 def conectar():
     return psycopg.connect(

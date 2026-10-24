@@ -1,8 +1,8 @@
-fastapi
+﻿fastapi
 uvicorn[standard]
 psycopg[binary]
 passlib[bcrypt]
 bcrypt==4.0.1
-python-jose[cryptography]
+PyJWT
 pydantic[email]
 python-multipart

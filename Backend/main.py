@@ -1,38 +1,74 @@
 import datetime
+import os
+from datetime import date
+from typing import Optional, Literal
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
-from jose import JWTError, jwt
-
+import jwt
+from jwt.exceptions import InvalidTokenError
 from database import conectar, criar_tabelas
+from contextlib import asynccontextmanager
 
-SECRET_KEY = "chave_secreta_para_desenvolvimento_trocar_em_producao"
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("A variável de ambiente SECRET_KEY não foi configurada.")
+
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 horas
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-app = FastAPI(title="Controle Financeiro API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    criar_tabelas()
+    yield
+
+
+app = FastAPI(
+    title="Controle Financeiro API",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+)
+
+@app.exception_handler(RequestValidationError)
+async def tratar_erro_validacao(request, exc):
+    erros = [
+        {
+            chave: valor
+            for chave, valor in erro.items()
+            if chave != "input"
+        }
+        for erro in exc.errors()
+    ]
+
+    return JSONResponse(
+        status_code=422,
+        content={"detail": erros}
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.on_event("startup")
-def startup():
-    criar_tabelas()
-
 class UsuarioCriar(BaseModel):
     email: EmailStr
-    senha: str
+    senha: str = Field(min_length=8, max_length=128)
 
 class UsuarioResposta(BaseModel):
     id: int
@@ -43,11 +79,11 @@ class Token(BaseModel):
     token_type: str
 
 class TransacaoBase(BaseModel):
-    descricao: str
-    categoria: str
-    tipo: str
-    valor: float
-    data: Optional[str] = None
+    descricao: str = Field(min_length=1, max_length=200)
+    categoria: str = Field(min_length=1, max_length=100)
+    tipo: Literal["receita", "despesa"]
+    valor: float = Field(gt=0, allow_inf_nan=False)
+    data: Optional[date] = None
 
 class TransacaoResposta(TransacaoBase):
     id: int
@@ -76,7 +112,7 @@ def obter_usuario_atual(token: str = Depends(oauth2_scheme)) -> dict:
         email: str = payload.get("sub")
         if email is None:
             raise excecao_autenticacao
-    except JWTError:
+    except InvalidTokenError:
         raise excecao_autenticacao
 
     with conectar() as conn:
