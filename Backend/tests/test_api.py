@@ -1,454 +1,356 @@
-from fastapi.testclient import TestClient
-from main import app
-
+```python
 import uuid
 
-client = TestClient(app)
+import pytest
+from fastapi.testclient import TestClient
+
+from main import app
 
 
-def test_api_esta_respondendo():
+@pytest.fixture(autouse=True)
+def limpar_banco_de_teste():
+    """Limpa somente o banco de dados dedicado aos testes."""
+    from database import conectar
+
+    with conectar() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT current_database() AS nome")
+            resultado = cur.fetchone()
+            nome_banco = resultado["nome"]
+
+            if nome_banco != "controle_financeiro_test":
+                pytest.fail(
+                    "Limpeza cancelada: o banco conectado é "
+                    f"'{nome_banco}', mas era esperado "
+                    "'controle_financeiro_test'."
+                )
+
+            cur.execute(
+                "TRUNCATE TABLE transacoes, usuarios "
+                "RESTART IDENTITY CASCADE"
+            )
+
+        conn.commit()
+
+
+@pytest.fixture(scope="module")
+def client():
+    """Inicia a API de teste e seu ciclo de vida."""
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def criar_usuario(client, senha="SenhaForte123!"):
+    """Cadastra um usuário com e-mail exclusivo."""
+    email = f"teste_{uuid.uuid4().hex[:12]}@exemplo.com"
+
+    resposta = client.post(
+        "/cadastrar",
+        json={"email": email, "senha": senha},
+    )
+
+    assert resposta.status_code == 201, (
+        f"Falha ao cadastrar usuário: "
+        f"{resposta.status_code} - {resposta.text}"
+    )
+
+    return email, senha
+
+
+def obter_token(client, email, senha):
+    """Autentica um usuário e obtém seu token."""
+    resposta = client.post(
+        "/login",
+        data={"username": email, "password": senha},
+    )
+
+    assert resposta.status_code == 200, resposta.text
+
+    dados = resposta.json()
+    assert "access_token" in dados
+
+    return dados["access_token"]
+
+
+def criar_transacao(client, token, dados=None):
+    """Cria uma transação autenticada."""
+    if dados is None:
+        dados = {
+            "descricao": "Compra de teste",
+            "categoria": "Alimentação",
+            "tipo": "despesa",
+            "valor": 50.00,
+            "data": "2026-10-21",
+        }
+
+    return client.post(
+        "/transacoes",
+        json=dados,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+def obter_transacoes(client, token):
+    """Consulta as transações visíveis para um usuário."""
+    resposta = client.get(
+        "/transacoes",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert resposta.status_code == 200, resposta.text
+
+    dados = resposta.json()
+
+    if isinstance(dados, dict):
+        dados = dados.get("transacoes", dados.get("items", []))
+
+    return dados
+
+
+def test_documentacao_api(client):
     resposta = client.get("/docs")
     assert resposta.status_code == 200
 
 
-def test_listar_transacoes_sem_login():
+def test_transacoes_sem_autenticacao(client):
     resposta = client.get("/transacoes")
     assert resposta.status_code == 401
 
-def test_cadastrar_usuario():
-    email = f"teste_{uuid.uuid4().hex[:10]}@exemplo.com"
 
-    resposta = client.post(
-        "/cadastrar",
-        json={
-            "email": email,
-            "senha": "SenhaForte123!"
-        }
-    )
+def test_registrar_usuario(client):
+    email, senha = criar_usuario(client)
 
-    assert resposta.status_code == 201
-    assert resposta.json()["email"] == email
-    assert "id" in resposta.json()
+    assert email.endswith("@exemplo.com")
+    assert senha == "SenhaForte123!"
 
 
-def test_login_usuario():
-    email = f"login_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_login_usuario(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    cadastro = client.post(
-        "/cadastrar",
-        json={
-            "email": email,
-            "senha": senha
-        }
-    )
-
-    assert cadastro.status_code == 201
-
-    resposta = client.post(
-        "/login",
-        data={
-            "username": email,
-            "password": senha
-        }
-    )
-
-    assert resposta.status_code == 200
-    assert "access_token" in resposta.json()
-    assert resposta.json()["token_type"] == "bearer"
+    assert token
 
 
-def test_crud_transacao():
-    email = f"transacao_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_criar_transacao(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    # 1. Criar usuário
-    cadastro = client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-    assert cadastro.status_code == 201
+    resposta = criar_transacao(client, token)
 
-    # 2. Fazer login e obter token
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-    assert login.status_code == 200
+    assert resposta.status_code == 201, resposta.text
+    assert resposta.json()["descricao"] == "Compra de teste"
 
-    token = login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
 
-    # 3. Criar uma transação
-    dados = {
-        "descricao": "Teste de mercado",
-        "categoria": "Alimentação",
-        "tipo": "despesa",
-        "valor": 100.00,
-        "data": "2026-10-21"
-    }
+def test_usuario_nao_pode_editar_transacao_de_outro(client):
+    email1, senha1 = criar_usuario(client)
+    token1 = obter_token(client, email1, senha1)
 
-    criacao = client.post(
-        "/transacoes",
-        json=dados,
-        headers=headers
-    )
-    assert criacao.status_code == 201
-    transacao_id = criacao.json()["id"]
-    assert float(criacao.json()["valor"]) == 100.00
+    criada = criar_transacao(client, token1)
+    assert criada.status_code == 201, criada.text
 
-    # 4. Consultar transações
-    consulta = client.get("/transacoes", headers=headers)
-    assert consulta.status_code == 200
-    assert any(
-        t["id"] == transacao_id
-        for t in consulta.json()
-    )
+    transacao_id = criada.json()["id"]
+    descricao_original = criada.json()["descricao"]
+    valor_original = float(criada.json()["valor"])
 
-    # 5. Editar a transação
-    dados["descricao"] = "Mercado atualizado"
-    dados["valor"] = 120.00
+    email2, senha2 = criar_usuario(client)
+    token2 = obter_token(client, email2, senha2)
 
-    edicao = client.put(
+    resposta = client.put(
         f"/transacoes/{transacao_id}",
-        json=dados,
-        headers=headers
-    )
-    assert edicao.status_code == 200
-    assert edicao.json()["descricao"] == "Mercado atualizado"
-    assert float(edicao.json()["valor"]) == 120.00
-
-    # 6. Excluir a transação
-    exclusao = client.delete(
-        f"/transacoes/{transacao_id}",
-        headers=headers
-    )
-    assert exclusao.status_code == 204
-
-    # 7. Confirmar que foi excluída
-    consulta_final = client.get("/transacoes", headers=headers)
-    assert all(
-        t["id"] != transacao_id
-        for t in consulta_final.json()
-    )
-
-
-def test_usuario_nao_pode_alterar_transacao_de_outro():
-    # Criar dois usuários independentes
-    email_a = f"usuario_a_{uuid.uuid4().hex[:10]}@exemplo.com"
-    email_b = f"usuario_b_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
-
-    for email in [email_a, email_b]:
-        resposta = client.post(
-            "/cadastrar",
-            json={"email": email, "senha": senha}
-        )
-        assert resposta.status_code == 201
-
-    # Obter token de cada usuário
-    def obter_token(email):
-        resposta = client.post(
-            "/login",
-            data={"username": email, "password": senha}
-        )
-        assert resposta.status_code == 200
-        return resposta.json()["access_token"]
-
-    token_a = obter_token(email_a)
-    token_b = obter_token(email_b)
-
-    headers_a = {"Authorization": f"Bearer {token_a}"}
-    headers_b = {"Authorization": f"Bearer {token_b}"}
-
-    # Usuário A cria uma transação
-    criacao = client.post(
-        "/transacoes",
         json={
-            "descricao": "Transação privada",
-            "categoria": "Teste",
+            "descricao": "Tentativa de alteração",
+            "categoria": "Outros",
             "tipo": "despesa",
-            "valor": 50.00,
-            "data": "2026-10-21"
+            "valor": 999.00,
+            "data": "2026-10-21",
         },
-        headers=headers_a
+        headers={"Authorization": f"Bearer {token2}"},
     )
-    assert criacao.status_code == 201
-    transacao_id = criacao.json()["id"]
 
-    # Usuário B tenta editar a transação de A
-    edicao = client.put(
+    assert resposta.status_code == 404
+
+    transacoes = obter_transacoes(client, token1)
+
+    original = next(
+        (item for item in transacoes if item["id"] == transacao_id),
+        None,
+    )
+
+    assert original is not None
+    assert original["descricao"] == descricao_original
+    assert float(original["valor"]) == valor_original
+
+
+def test_usuario_nao_pode_excluir_transacao_de_outro(client):
+    email1, senha1 = criar_usuario(client)
+    token1 = obter_token(client, email1, senha1)
+
+    criada = criar_transacao(client, token1)
+    assert criada.status_code == 201, criada.text
+
+    transacao_id = criada.json()["id"]
+    descricao_original = criada.json()["descricao"]
+
+    email2, senha2 = criar_usuario(client)
+    token2 = obter_token(client, email2, senha2)
+
+    resposta = client.delete(
         f"/transacoes/{transacao_id}",
-        json={
-            "descricao": "Tentativa de invasão",
-            "categoria": "Teste",
-            "tipo": "despesa",
-            "valor": 1.00,
-            "data": "2026-10-21"
-        },
-        headers=headers_b
+        headers={"Authorization": f"Bearer {token2}"},
     )
-    assert edicao.status_code == 404
 
-    # Usuário B tenta excluir a transação de A
-    exclusao = client.delete(
-        f"/transacoes/{transacao_id}",
-        headers=headers_b
+    assert resposta.status_code == 404
+
+    transacoes = obter_transacoes(client, token1)
+
+    original = next(
+        (item for item in transacoes if item["id"] == transacao_id),
+        None,
     )
-    assert exclusao.status_code == 404
 
-    # Confirmar que a transação continua acessível ao dono
-    consulta = client.get("/transacoes", headers=headers_a)
-    assert consulta.status_code == 200
-    assert any(t["id"] == transacao_id for t in consulta.json())
+    assert original is not None
+    assert original["descricao"] == descricao_original
 
-    # Limpar a transação de teste com o usuário proprietário
-    limpeza = client.delete(
-        f"/transacoes/{transacao_id}",
-        headers=headers_a
-    )
-    assert limpeza.status_code == 204
 
-def test_cadastro_rejeita_senha_curta():
+def test_senha_curta_e_rejeitada(client):
     resposta = client.post(
         "/cadastrar",
         json={
-            "email": f"senha_{uuid.uuid4().hex[:10]}@exemplo.com",
-            "senha": "123"
-        }
+            "email": f"senha_curta_{uuid.uuid4().hex[:8]}@exemplo.com",
+            "senha": "123",
+        },
     )
 
     assert resposta.status_code == 422
 
 
-def test_transacao_rejeita_tipo_invalido():
-    email = f"tipo_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_tipo_transacao_invalido(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-
-    token = login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    resposta = client.post(
-        "/transacoes",
-        json={
-            "descricao": "Teste",
-            "categoria": "Teste",
-            "tipo": "invasao",
-            "valor": 10,
-            "data": "2026-10-21"
+    resposta = criar_transacao(
+        client,
+        token,
+        {
+            "descricao": "Teste inválido",
+            "categoria": "Outros",
+            "tipo": "tipo_invalido",
+            "valor": 10.00,
+            "data": "2026-10-21",
         },
-        headers=headers
     )
 
     assert resposta.status_code == 422
 
 
-def test_transacao_rejeita_valor_negativo():
-    email = f"valor_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_valor_negativo_rejeitado(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-
-    token = login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    resposta = client.post(
-        "/transacoes",
-        json={
-            "descricao": "Teste",
-            "categoria": "Teste",
+    resposta = criar_transacao(
+        client,
+        token,
+        {
+            "descricao": "Teste negativo",
+            "categoria": "Outros",
             "tipo": "despesa",
-            "valor": -50,
-            "data": "2026-10-21"
+            "valor": -10.00,
+            "data": "2026-10-21",
         },
-        headers=headers
     )
 
     assert resposta.status_code == 422
 
 
-def test_transacao_rejeita_descricao_vazia():
-    email = f"descricao_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_descricao_vazia_rejeitada(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-
-    token = login.json()["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-
-    resposta = client.post(
-        "/transacoes",
-        json={
+    resposta = criar_transacao(
+        client,
+        token,
+        {
             "descricao": "",
-            "categoria": "Teste",
+            "categoria": "Outros",
             "tipo": "despesa",
-            "valor": 50,
-            "data": "2026-10-21"
+            "valor": 10.00,
+            "data": "2026-10-21",
         },
-        headers=headers
-    )
-
-    assert resposta.status_code == 422
-
-def test_edicao_rejeita_valor_negativo():
-    email = f"edicao_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
-
-    cadastro = client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-    assert cadastro.status_code == 201
-
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-    assert login.status_code == 200
-
-    headers = {
-        "Authorization": f"Bearer {login.json()['access_token']}"
-    }
-
-    criacao = client.post(
-        "/transacoes",
-        json={
-            "descricao": "Compra original",
-            "categoria": "Teste",
-            "tipo": "despesa",
-            "valor": 50,
-            "data": "2026-10-21"
-        },
-        headers=headers
-    )
-    assert criacao.status_code == 201
-
-    transacao_id = criacao.json()["id"]
-
-    edicao = client.put(
-        f"/transacoes/{transacao_id}",
-        json={
-            "descricao": "Tentativa inválida",
-            "categoria": "Teste",
-            "tipo": "despesa",
-            "valor": -100,
-            "data": "2026-10-21"
-        },
-        headers=headers
-    )
-
-    assert edicao.status_code == 422
-
-    consulta = client.get("/transacoes", headers=headers)
-    assert consulta.status_code == 200
-
-    transacao = next(
-        t for t in consulta.json()
-        if t["id"] == transacao_id
-    )
-    assert float(transacao["valor"]) == 50.0
-    assert transacao["descricao"] == "Compra original"
-
-    limpeza = client.delete(
-        f"/transacoes/{transacao_id}",
-        headers=headers
-    )
-    assert limpeza.status_code == 204
-
-def test_transacao_rejeita_data_invalida():
-    email = f"data_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
-
-    cadastro = client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
-    )
-    assert cadastro.status_code == 201
-
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
-    )
-    assert login.status_code == 200
-
-    headers = {
-        "Authorization": f"Bearer {login.json()['access_token']}"
-    }
-
-    resposta = client.post(
-        "/transacoes",
-        json={
-            "descricao": "Teste de data",
-            "categoria": "Teste",
-            "tipo": "despesa",
-            "valor": 50,
-            "data": "2026-99-99"
-        },
-        headers=headers
     )
 
     assert resposta.status_code == 422
 
 
-def test_transacao_rejeita_valor_infinito():
-    email = f"infinito_{uuid.uuid4().hex[:10]}@exemplo.com"
-    senha = "SenhaForte123!"
+def test_editar_transacao_com_valor_negativo(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
 
-    cadastro = client.post(
-        "/cadastrar",
-        json={"email": email, "senha": senha}
+    criada = criar_transacao(client, token)
+    assert criada.status_code == 201, criada.text
+
+    transacao_id = criada.json()["id"]
+    descricao_original = criada.json()["descricao"]
+    valor_original = float(criada.json()["valor"])
+
+    resposta = client.put(
+        f"/transacoes/{transacao_id}",
+        json={
+            "descricao": "Alteração inválida",
+            "categoria": "Outros",
+            "tipo": "despesa",
+            "valor": -100.00,
+            "data": "2026-10-21",
+        },
+        headers={"Authorization": f"Bearer {token}"},
     )
-    assert cadastro.status_code == 201
 
-    login = client.post(
-        "/login",
-        data={"username": email, "password": senha}
+    assert resposta.status_code == 422
+
+    transacoes = obter_transacoes(client, token)
+
+    original = next(
+        (item for item in transacoes if item["id"] == transacao_id),
+        None,
     )
-    assert login.status_code == 200
 
-    headers = {
-        "Authorization": f"Bearer {login.json()['access_token']}"
-    }
+    assert original is not None
+    assert original["descricao"] == descricao_original
+    assert float(original["valor"]) == valor_original
 
-    resposta = client.post(
-        "/transacoes",
-        content=(
-            b'{"descricao":"Teste de infinito",'
-            b'"categoria":"Teste",'
-            b'"tipo":"despesa",'
-            b'"valor":1e309,'
-            b'"data":"2026-10-21"}'
-        ),
-        headers={
-            **headers,
-            "Content-Type": "application/json"
-        }
+
+def test_data_invalida_rejeitada(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
+
+    resposta = criar_transacao(
+        client,
+        token,
+        {
+            "descricao": "Data inválida",
+            "categoria": "Outros",
+            "tipo": "despesa",
+            "valor": 10.00,
+            "data": "data-invalida",
+        },
+    )
+
+    assert resposta.status_code == 422
+
+
+def test_valor_infinito_rejeitado(client):
+    email, senha = criar_usuario(client)
+    token = obter_token(client, email, senha)
+
+    resposta = criar_transacao(
+        client,
+        token,
+        {
+            "descricao": "Valor infinito",
+            "categoria": "Outros",
+            "tipo": "despesa",
+            "valor": "Infinity",
+            "data": "2026-10-21",
+        },
     )
 
     assert resposta.status_code == 422

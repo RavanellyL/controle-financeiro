@@ -1,15 +1,13 @@
 import datetime
 import os
 from datetime import date
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
-from typing import List, Optional
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
 from passlib.context import CryptContext
 import jwt
 from jwt.exceptions import InvalidTokenError
@@ -66,6 +64,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 class UsuarioCriar(BaseModel):
     email: EmailStr
     senha: str = Field(min_length=8, max_length=128)
@@ -157,8 +156,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
                 )
             
             token_acesso = criar_token_acesso(dados={"sub": usuario["email"]})
-            return {"access_token": token_acesso, "token_type": "bearer"}
-
+            return {"access_token": token_acesso, "token_type": "bearer"}  # nosec B105
 @app.get("/transacoes", response_model=List[TransacaoResposta])
 def listar_transacoes(usuario_atual: dict = Depends(obter_usuario_atual)):
     with conectar() as conn:
@@ -171,7 +169,11 @@ def listar_transacoes(usuario_atual: dict = Depends(obter_usuario_atual)):
 
 @app.post("/transacoes", response_model=TransacaoResposta, status_code=status.HTTP_201_CREATED)
 def criar_transacao(transacao: TransacaoBase, usuario_atual: dict = Depends(obter_usuario_atual)):
-    data_transacao = transacao.data if transacao.data else datetime.date.today().isoformat()
+    if transacao.data:
+        data_transacao = transacao.data.isoformat()
+    else:
+        data_transacao = datetime.date.today().isoformat()
+
     with conectar() as conn:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -188,7 +190,11 @@ def criar_transacao(transacao: TransacaoBase, usuario_atual: dict = Depends(obte
 
 @app.put("/transacoes/{transacao_id}", response_model=TransacaoResposta)
 def editar_transacao(transacao_id: int, dados: TransacaoBase, usuario_atual: dict = Depends(obter_usuario_atual)):
-    data_transacao = dados.data if dados.data else datetime.date.today().isoformat()
+    if dados.data:
+        data_transacao = dados.data.isoformat()
+    else:
+        data_transacao = datetime.date.today().isoformat()
+
     with conectar() as conn:
         with conn.cursor() as cursor:
             cursor.execute(

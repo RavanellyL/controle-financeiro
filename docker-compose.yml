@@ -1,5 +1,18 @@
 
 services:
+  test:
+    profiles: ["test"]
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.test
+    env_file:
+      - ./Backend/.env
+    environment:
+      DATABASE_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env da raiz}@db:5432/controle_financeiro_test"
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build:
       context: .
