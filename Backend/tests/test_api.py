@@ -1,4 +1,3 @@
-```python
 import uuid
 
 import pytest
@@ -9,7 +8,6 @@ from main import app
 
 @pytest.fixture(autouse=True)
 def limpar_banco_de_teste():
-    """Limpa somente o banco de dados dedicado aos testes."""
     from database import conectar
 
     with conectar() as conn:
@@ -35,13 +33,11 @@ def limpar_banco_de_teste():
 
 @pytest.fixture(scope="module")
 def client():
-    """Inicia a API de teste e seu ciclo de vida."""
     with TestClient(app) as test_client:
         yield test_client
 
 
 def criar_usuario(client, senha="SenhaForte123!"):
-    """Cadastra um usuário com e-mail exclusivo."""
     email = f"teste_{uuid.uuid4().hex[:12]}@exemplo.com"
 
     resposta = client.post(
@@ -58,7 +54,6 @@ def criar_usuario(client, senha="SenhaForte123!"):
 
 
 def obter_token(client, email, senha):
-    """Autentica um usuário e obtém seu token."""
     resposta = client.post(
         "/login",
         data={"username": email, "password": senha},
@@ -73,7 +68,6 @@ def obter_token(client, email, senha):
 
 
 def criar_transacao(client, token, dados=None):
-    """Cria uma transação autenticada."""
     if dados is None:
         dados = {
             "descricao": "Compra de teste",
@@ -91,7 +85,6 @@ def criar_transacao(client, token, dados=None):
 
 
 def obter_transacoes(client, token):
-    """Consulta as transações visíveis para um usuário."""
     resposta = client.get(
         "/transacoes",
         headers={"Authorization": f"Bearer {token}"},
