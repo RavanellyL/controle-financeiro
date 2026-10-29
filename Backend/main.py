@@ -35,6 +35,7 @@ app = FastAPI(
     title="Controle Financeiro API",
     openapi_url="/openapi.json",
     docs_url="/docs",
+    lifespan=lifespan,
 )
 
 @app.exception_handler(RequestValidationError)
