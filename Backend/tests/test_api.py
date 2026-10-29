@@ -7,7 +7,7 @@ from main import app
 
 
 @pytest.fixture(autouse=True)
-def limpar_banco_de_teste():
+def limpar_banco_de_teste(client):
     from database import conectar
 
     with conectar() as conn:
